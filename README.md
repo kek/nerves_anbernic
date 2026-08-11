@@ -143,32 +143,153 @@ Settings are 115200 8N1.
 image. Configure it from your application the usual way with
 `vintage_net_wifi`.
 
-## Hardware verification checklist
+## Verifying it on a device
 
-Nothing here has been confirmed on a physical RG40XXV — the system is built
-and verified at build time only (see "How this was verified"). When you
-flash your first card, these are the things worth checking, roughly in the
-order they would tell you something has gone wrong:
+Nothing here has been confirmed on a physical RG40XXV. This is the
+procedure to do that. The awkward part is that the device has no pin
+header, so **you have to bake your way in before you flash** — there is no
+console to fall back on if you forget.
 
-1. **It boots at all.** Console output on `ttyS0`. If the SPL never starts,
-   suspect the DRAM timings in `uboot/uboot.defconfig`, which come from
-   upstream's generic H700 config.
-2. **The right device tree loaded.** `cat /proc/device-tree/model` should
-   read `Anbernic RG40XX V`. If it says `RG35XX 2024`, U-Boot booted with
-   its own built-in DTB instead of ours and WiFi will be missing.
-3. **Buttons.** This is the least-certain part. The button GPIO mapping is
-   inherited from mainline's `rg35xx-plus.dts` on the grounds that the
-   RG40XXV is the same PCB family; that is a reasonable inference, not a
-   confirmed fact. Check with `evtest` that every button reports, and that
-   the labels match the physical layout.
-4. **WiFi.** `ip link` should show a `wlan0`.
-5. **Battery.** `/sys/class/power_supply/axp717-battery/` should report a
-   plausible voltage and capacity.
-6. **Audio**, then **the RGB LED** on PI7.
+### 1. Bake in WiFi and SSH before flashing
 
-If buttons are wrong, fixing them is a small edit to
-`linux/sun50i-h700-anbernic-rg40xx-v.dts` — the pins are all in one
-`gpio-keys` node inherited from the parent, and can be overridden there.
+In your app's `config/target.exs`:
+
+```elixir
+config :vintage_net,
+  config: [
+    {"wlan0",
+     %{
+       type: VintageNetWiFi,
+       vintage_net_wifi: %{
+         networks: [%{key_mgmt: :wpa_psk, ssid: "your-ssid", psk: "your-password"}]
+       },
+       ipv4: %{method: :dhcp}
+     }}
+  ]
+```
+
+`nerves_pack` pulls in `nerves_ssh` and `mdns_lite`, so with that config the
+device should come up reachable as `nerves.local`. Make sure you have an SSH
+key (`~/.ssh/id_rsa.pub` or `id_ecdsa.pub`) — that is what authorises you.
+
+Then `mix firmware && mix burn`, writing to the slot the device boots from.
+
+> [!WARNING]
+> This destroys the stock Anbernic OS on that card. Image your original card
+> first, or use a spare — the stock card is also your control experiment if
+> the device shows no signs of life.
+
+### 2. Power on and watch the power LED
+
+This is the only feedback available without a console, and it is more
+informative than it looks. `uboot/uboot.defconfig` sets
+`CONFIG_SPL_SUNXI_LED_STATUS_GPIO=268`, which is PI12 — the same pin
+mainline's device tree uses for the power LED. So the **SPL** lights that
+LED, long before Linux.
+
+- **LED lights** → the BROM read sector 16, accepted the image, and ran our
+  SPL. Card layout and bootloader are fine; anything wrong is later.
+- **LED never lights** → the SPL never ran. Wrong card slot, a bad write,
+  or the BROM rejected the image. Nothing about Linux is implicated yet.
+- **LED lights but nothing else happens** → SPL ran but DRAM init or
+  U-Boot failed. Suspect the DRAM timings in `uboot/uboot.defconfig`, which
+  are upstream's generic H700 values. This is the case that needs UART.
+
+### 3. Get in
+
+```bash
+ssh nerves.local
+```
+
+**If this works, you have already proved a lot.** Reaching the device over
+WiFi means `mmc1` was enabled, which means *our* device tree loaded rather
+than U-Boot's built-in `rg35xx-2024` — that one carries no WiFi at all. So
+a successful SSH rules out the failure this system was most at risk of.
+
+Confirm it explicitly anyway:
+
+```elixir
+cmd "cat /proc/device-tree/model"     # => Anbernic RG40XX V
+```
+
+### 4. Check the buttons — the least certain thing here
+
+The button GPIO mapping is inherited from mainline's `rg35xx-plus.dts` on
+the premise that the RG40XXV is the same board family. That is a reasonable
+inference, not a confirmed fact, so this is the check most likely to find
+something.
+
+List what the kernel found:
+
+```elixir
+cmd "cat /proc/bus/input/devices"
+```
+
+You should see the gamepad and volume `gpio-keys` devices. To watch actual
+presses, add `{:input_event, "~> 1.4"}` to your app and:
+
+```elixir
+{:ok, _} = InputEvent.start_link("/dev/input/event0")
+# press buttons, then:
+flush()
+```
+
+That is the better tool because it streams into IEx without blocking. The
+image also ships `evtest`, but plain `evtest` never exits and busybox here
+has no `timeout`, so it will wedge an IEx session. Use its one-shot query
+form instead — hold the button down and run:
+
+```elixir
+# exit status 10 means "currently pressed"
+cmd "evtest --query /dev/input/event0 EV_KEY BTN_SOUTH"
+```
+
+Work through every button and check the reported codes match the physical
+layout. If they don't, the fix is small: the pins live in one `gpio-keys`
+node inherited from the parent DTS, and can be overridden in
+`linux/sun50i-h700-anbernic-rg40xx-v.dts`.
+
+### 5. Everything else
+
+```elixir
+# which drivers actually bound
+cmd "dmesg | grep -iE 'axp717|rtw88|mmc|sunxi|panfrost'"
+
+# battery and charger (list first -- do not assume the name)
+cmd "ls /sys/class/power_supply/"
+cmd "cat /sys/class/power_supply/*/capacity /sys/class/power_supply/*/voltage_now"
+
+# LEDs, including the RGB one on PI7
+cmd "ls /sys/class/leds/"
+
+# audio
+cmd "aplay -l"
+cmd "speaker-test -c 2 -t sine -l 1"
+
+# firmware metadata round-trips through the U-Boot environment
+cmd "fw_printenv nerves_fw_active"
+```
+
+### 6. If it never gets far enough to SSH
+
+Then you need UART0 — `ttyS0`, 115200 8N1, 3.3V logic, on internal test
+pads, which means opening the case. Two things make that more useful:
+
+- Drop `quiet` and add `earlycon` to the `append` line in
+  `rootfs_overlay/boot/extlinux/extlinux-a.conf` to get early kernel output.
+- Set `CONFIG_BOOTDELAY=1` in `uboot/uboot.defconfig` so you can interrupt
+  U-Boot and get a prompt. It is 0 here for fast boot, which is the wrong
+  trade-off while bringing a board up. From a U-Boot prompt you can
+  `printenv`, `ls mmc 0:2 /boot`, and boot by hand.
+
+Both need a system rebuild, so if you expect to need UART, make the changes
+before the first build rather than after.
+
+### What to report back
+
+If something fails, the useful details are: which stage above it reached,
+the full `dmesg`, and `cat /proc/device-tree/model`. Those three narrow it
+down to bootloader, device tree, or driver almost immediately.
 
 ## How this was verified
 
