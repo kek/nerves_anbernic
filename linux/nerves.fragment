@@ -1,0 +1,86 @@
+#
+# Kernel configuration deltas for Nerves on the Anbernic RG40XXV.
+#
+# This fragment is the reviewable artifact; linux/linux-6.18.defconfig is
+# its output. Regenerate with tools/gen-kernel-defconfig.sh, which does:
+#
+#   make ARCH=arm64 defconfig
+#   scripts/kconfig/merge_config.sh -m .config linux/nerves.fragment
+#   make ARCH=arm64 olddefconfig savedefconfig
+#
+# The base is the stock arm64 defconfig rather than a hand-rolled minimal
+# config, because that is the configuration the RG35XX-family device trees
+# were developed and tested against upstream. It carries more drivers than
+# this device needs; trimming it is follow-on work, and the rootfs
+# partitions in fwup_include/fwup-common.conf are sized accordingly.
+#
+
+#
+# Nerves requirements
+#
+
+# Root filesystem is a read-only squashfs, application data is f2fs.
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
+CONFIG_SQUASHFS_ZSTD=y
+CONFIG_SQUASHFS_FILE_DIRECT=y
+CONFIG_F2FS_FS=y
+CONFIG_TMPFS=y
+CONFIG_TMPFS_POSIX_ACL=y
+
+# erlinit runs as PID 1 straight out of the squashfs; there is no initramfs.
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+# CONFIG_BLK_DEV_INITRD is not set
+
+# Nerves reads input devices through evdev.
+CONFIG_INPUT_EVDEV=y
+
+# Swap on compressed RAM. 1 GB is not a lot for the BEAM plus a page cache.
+CONFIG_ZRAM=y
+CONFIG_ZRAM_BACKEND_ZSTD=y
+
+#
+# Anbernic RG40XXV hardware
+#
+
+# AXP717 PMIC: regulators, ADC, and the battery/USB power supplies that
+# make System.cmd("cat", ["/sys/class/power_supply/..."]) useful. The
+# regulator and MFD halves are already in the arm64 defconfig; the power
+# supply drivers are not.
+CONFIG_MFD_AXP20X_I2C=y
+CONFIG_REGULATOR_AXP20X=y
+CONFIG_AXP20X_ADC=y
+CONFIG_AXP20X_POWER=y
+CONFIG_BATTERY_AXP20X=y
+
+# RTL8821CS: SDIO WiFi and UART Bluetooth.
+CONFIG_RTW88=m
+CONFIG_RTW88_8821CS=m
+# BT stays a module: it can't be built in while RFKILL is a module, and
+# nothing needs Bluetooth before the application starts anyway.
+CONFIG_BT=m
+CONFIG_BT_HCIUART=m
+CONFIG_BT_HCIUART_3WIRE=y
+CONFIG_BT_HCIUART_RTL=y
+
+# The H700's SID eFuse, read by boardid for the hostname.
+CONFIG_NVMEM_SUNXI_SID=y
+
+# Audio. The codec@5096000 node the board DTS enables is
+# "allwinner,sun50i-h616-codec", which sun4i-codec.c drives -- and which the
+# arm64 defconfig does not enable.
+CONFIG_SND_SUN4I_CODEC=m
+
+# USB gadget. Mainline sets usbotg to dr_mode = "peripheral", so the USB-C
+# port can present a network interface and a serial console -- the primary
+# way onto this device, since it has no pin header. The gadget itself is
+# composed at runtime via configfs; see README.
+CONFIG_USB_GADGET=y
+CONFIG_USB_CONFIGFS=y
+CONFIG_USB_CONFIGFS_ECM=y
+CONFIG_USB_CONFIGFS_RNDIS=y
+CONFIG_USB_CONFIGFS_ACM=y
+CONFIG_USB_MUSB_HDRC=y
+CONFIG_USB_MUSB_SUNXI=y
+CONFIG_USB_MUSB_GADGET=y

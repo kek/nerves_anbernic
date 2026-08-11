@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: None
+# SPDX-License-Identifier: CC0-1.0
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  OTP_VERSION: "29.0.4"
+  ELIXIR_VERSION: "1.20.2-otp-29"
+  NERVES_BOOTSTRAP_VERSION: "1.17.0"
+  KERNEL_VERSION: "6.18.44"
+
+jobs:
+  # Cheap checks that catch the failures which would otherwise only show up
+  # after flashing a card. Deliberately separate from the system build so
+  # they report in a couple of minutes rather than an hour.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the board device tree
+        run: tools/check-dts.sh "$KERNEL_VERSION"
+
+      - name: Verify the kernel defconfig is in sync with nerves.fragment
+        run: |
+          tools/gen-kernel-defconfig.sh "$KERNEL_VERSION"
+          if ! git diff --exit-code -- linux/; then
+            echo
+            echo "linux/linux-*.defconfig is out of sync with linux/nerves.fragment."
+            echo "Run tools/gen-kernel-defconfig.sh and commit the result."
+            exit 1
+          fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Install nerves_bootstrap
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix archive.install hex nerves_bootstrap "$NERVES_BOOTSTRAP_VERSION" --force
+
+      - name: Lint the Buildroot defconfig
+        run: |
+          mix deps.get
+          mix nerves.system.lint nerves_defconfig
+
+  build-system:
+    # Building Buildroot from scratch takes the better part of an hour, so
+    # only do it where the result is worth having.
+    if: github.ref == 'refs/heads/main' || github.ref_type == 'tag'
+    needs: [checks, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up disk space
+        # A Buildroot output tree does not fit next to everything the hosted
+        # runner image preinstalls.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            automake bc build-essential cmake cpio curl git libncurses5-dev \
+            libssl-dev pkg-config squashfs-tools unzip wget
+
+      - name: Install Nerves tooling
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix archive.install hex nerves_bootstrap "$NERVES_BOOTSTRAP_VERSION" --force
+
+      - name: Build the system
+        run: |
+          mix deps.get
+          mix compile
+
+      - name: Archive the built system
+        run: mix nerves.artifact
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nerves_system_rg40xxv
+          path: "*.tar.gz"
+          if-no-files-found: error

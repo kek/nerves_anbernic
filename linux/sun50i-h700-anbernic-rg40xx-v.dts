@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * Device tree for the Anbernic RG40XX V (Allwinner H700).
+ *
+ * The RG40XX V is the same PCB family as the RG35XX Plus, so nearly
+ * everything is inherited: the AXP717 PMIC and its regulator tree,
+ * battery and USB power supplies, mmc0, the gamepad and volume buttons
+ * as gpio-keys, LEDs, the audio codec, USB, and the RTL8821CS SDIO
+ * WiFi + UART Bluetooth that rg35xx-plus.dts adds on top of
+ * rg35xx-2024.dts.
+ *
+ * NOTE ON THE INCLUDE PATH: this file is built via Buildroot's
+ * BR2_LINUX_KERNEL_CUSTOM_DTS_PATH, which copies it into
+ * arch/arm64/boot/dts/ (flat) rather than into the allwinner/
+ * subdirectory. Hence the "allwinner/" prefix below. cpp resolves
+ * nested includes relative to the including file's own directory, so
+ * rg35xx-plus.dts still finds sun50i-h616.dtsi normally. Building this
+ * as a genuine in-tree file would drop the prefix.
+ *
+ * This is a deliberately headless device tree. The 4" panel needs the
+ * out-of-tree panel-mipi-dpi-spi driver plus an H616 PWM driver for the
+ * backlight, neither of which is upstream, so no panel/tcon/DE2 nodes
+ * are described here. See docs/superpowers/specs for the reasoning.
+ */
+
+#include "allwinner/sun50i-h700-anbernic-rg35xx-plus.dts"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	model = "Anbernic RG40XX V";
+
+	/*
+	 * Downstream trees (ROCKNIX, Batocera) spell this "anbernic,rg40xx-V"
+	 * with a capital V. Lowercase here to match kernel conventions;
+	 * nothing in a Nerves image matches on the string.
+	 */
+	compatible = "anbernic,rg40xx-v", "allwinner,sun50i-h700";
+};
+
+/*
+ * The RGB indicator LED. Referenced by path rather than by label
+ * because mainline's rg35xx-2024.dts declares its gpio-leds node
+ * without one, and adding a label would mean patching a mainline DTS
+ * just to extend it.
+ */
+&{/leds} {
+	led-rgb {
+		function = LED_FUNCTION_INDICATOR;
+		color = <LED_COLOR_ID_RGB>;
+		gpios = <&pio 8 7 GPIO_ACTIVE_HIGH>; /* PI7 */
+	};
+};
