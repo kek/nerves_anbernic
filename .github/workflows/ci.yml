@@ -22,6 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify the image layout is self-consistent
+        run: tools/check-consistency.sh
+
       - name: Verify the board device tree
         run: tools/check-dts.sh "$KERNEL_VERSION"
 
@@ -59,7 +62,7 @@ jobs:
   build-system:
     # Building Buildroot from scratch takes the better part of an hour, so
     # only do it where the result is worth having.
-    if: github.ref == 'refs/heads/main' || github.ref_type == 'tag'
+    if: github.ref == 'refs/heads/trunk' || github.ref_type == 'tag'
     needs: [checks, lint]
     runs-on: ubuntu-latest
     steps:

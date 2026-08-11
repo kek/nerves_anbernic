@@ -35,6 +35,11 @@ BR2_LINUX_KERNEL_INSTALL_TARGET=y
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_PACKAGE_BUSYBOX_CONFIG="${BR2_EXTERNAL_NERVES_PATH}/board/nerves-common/busybox.config"
 BR2_PACKAGE_F2FS_TOOLS=y
+# Do NOT set BR2_TARGET_ROOTFS_SQUASHFS4_XZ here. U-Boot reads the kernel,
+# the device tree, and extlinux.conf out of the squashfs itself, and its
+# squashfs driver supports zlib/lzo/lz4/zstd but not xz. Buildroot defaults
+# to "-comp gzip", which U-Boot's FS_SQUASHFS handles via ZLIB. Switching to
+# xz to save space would produce an image that cannot be booted.
 BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_LIBP11=y
 BR2_PACKAGE_UNIXODBC=y

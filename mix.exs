@@ -54,7 +54,7 @@ defmodule NervesSystemRG40XXV.MixProject do
         {"TARGET_OS", "linux"},
         {"TARGET_ABI", "gnu"},
         {"TARGET_GCC_FLAGS",
-         "-mcpu=cortex-a53 -fstack-protector-strong -fPIE -pie -Wl,-z,now -Wl,-z,relro"}
+         "-mabi=lp64 -fstack-protector-strong -mcpu=cortex-a53 -fPIE -pie -Wl,-z,now -Wl,-z,relro"}
       ],
       checksum: package_files()
     ]
