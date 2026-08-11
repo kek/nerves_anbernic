@@ -156,21 +156,53 @@ If buttons are wrong, fixing them is a small edit to
 
 ## How this was verified
 
-No RG40XXV was available while building this, so on-device boot is
-**unverified**. What *was* verified:
+No RG40XXV was available while building this, so **on-device boot is
+unverified**. Everything short of that is:
 
-- The board device tree compiles against a real Linux v6.18 tree, and the
-  built DTB was inspected to confirm `model`, `compatible`, that `led-rgb`
-  merges into mainline's (unlabelled) `leds` node, and that the RTL8821CS
-  `wifi@1` node is inherited.
-- Every kernel symbol `linux/nerves.fragment` asks for survives
-  `olddefconfig`, and 41 boot-critical driver symbols are asserted present
-  in the resulting config — plus an assertion that no initramfs is
-  configured, since `erlinit` must be PID 1 straight out of the squashfs.
-  `tools/gen-kernel-defconfig.sh` fails if any of that regresses.
-- A full Buildroot build produces a flashable `.fw`.
-- `mix nerves.system.lint` passes.
+**The system builds.** A full Buildroot build completes and produces
+`bl31.bin`, `Image`, `sun50i-h700-anbernic-rg40xx-v.dtb`,
+`u-boot-sunxi-with-spl.bin`, `uboot-env.bin`, and `rootfs.squashfs`. ATF
+built for `PLAT=sun50i_h616` and its BL31 was folded into U-Boot, so the
+bootloader chain is wired up rather than merely configured.
 
+**The device tree is what it claims to be.** The DTB *as built by
+Buildroot inside the real kernel tree* was decompiled and checked: model
+`Anbernic RG40XX V`, compatible `anbernic,rg40xx-v`, the `led-rgb` node
+merged into mainline's unlabelled `leds` node, the RTL8821CS `wifi@1` node
+inherited, 17 button nodes, and no panel node.
+`tools/check-dts.sh` reruns this standalone against a fresh kernel tree.
+
+**The kernel has the drivers.** Every symbol `linux/nerves.fragment` asks
+for survives `olddefconfig`, and 41 boot-critical drivers are asserted
+present — plus an assertion that no initramfs is configured, since
+`erlinit` must be PID 1 straight out of the squashfs.
+`tools/gen-kernel-defconfig.sh` fails if any of that regresses.
+
+**A real firmware image is produced and lands correctly on disk.**
+`mix firmware` against this system produces a `.fw`
+(`meta-platform=rg40xxv`, `meta-architecture=aarch64`). Applying its
+`complete` task to a disk image and inspecting the result confirms:
+
+- `eGON.BT0` at byte 8192, so the Allwinner BROM will find the SPL
+- partitions at LBA 43008 / 829440 / 1615872 — i.e. `mmcblk0p2`, `p3`,
+  `p4`, matching what `extlinux.conf` and `erlinit.config` expect
+- rootfs A is a valid squashfs, gzip-compressed, which is the one
+  compression U-Boot can actually read here
+- the U-Boot environment at `0x400000` carries `nerves_fw_active=a`,
+  `a.nerves_fw_platform=rg40xxv`, and the A/B `bootcmd`
+- `/boot/Image`, `/boot/sun50i-h700-anbernic-rg40xx-v.dtb`, and both
+  `extlinux` configs are present inside the rootfs
+
+**The layout is self-consistent.** `tools/check-consistency.sh` asserts the
+partition offsets, `CONFIG_ENV_OFFSET`, `fw_env.config`, each `root=`, and
+erlinit's mount all agree. `mix nerves.system.lint` reports no failed
+checks; it advises adding `e2fsprogs`, which this system deliberately omits
+because the application partition is f2fs and `f2fs-tools` is what
+`nerves_runtime` needs to reformat it.
+
+What none of that proves is that the hardware comes up: the DRAM timings,
+the button GPIO mapping, and USB gadget behaviour are all inherited on the
+reasonable-but-unconfirmed premise that the RG40XXV matches its siblings.
 Treat the checklist above as the remaining half of the work.
 
 ## Building the system from source

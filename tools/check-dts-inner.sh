@@ -88,10 +88,15 @@ else
     rc=1
 fi
 
-# Headless by design: no panel should have crept in, since no mainline driver
-# exists for it. If this fires, someone added a node without the driver.
+# Headless by design. This is a trip-wire in both directions: it catches a
+# panel node added here without the driver to back it, and it also fires if
+# mainline itself gains H700 display support -- in which case the headless
+# decision in the README is worth revisiting rather than worked around.
 if grep -qE 'panel' /tmp/board.decompiled.dts; then
-    echo "  FAILED   a panel node is present, but this system is headless"
+    echo "  FAILED   a panel node is present, but this system is headless."
+    echo "           Either it was added here without a driver, or mainline"
+    echo "           gained H700 display support -- see 'Adding display"
+    echo "           support' in the README before changing this check."
     rc=1
 else
     echo "  ok       no panel node (headless by design)"
