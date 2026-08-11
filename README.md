@@ -79,9 +79,10 @@ mix firmware
 mix burn
 ```
 
-The first `mix firmware` builds the system itself, which takes the better
-part of an hour and needs roughly 25 GB free. Subsequent builds reuse the
-cached artifact in `~/.nerves/artifacts`.
+If `~/.nerves/artifacts` already holds a built `nerves_system_rg40xxv`,
+`mix firmware` finds it and takes seconds. Building the system from source
+— a machine that has never built it, or CI — takes the better part of an
+hour and needs roughly 25 GB free.
 
 ## Flashing
 
@@ -114,6 +115,15 @@ USB-C port can present a network interface and a serial console over the
 charging cable. The kernel here is built with `USB_CONFIGFS`, `..._ECM`,
 `..._RNDIS`, and `..._ACM`, but nothing composes a gadget at boot — that is
 the application's job, as on other Nerves gadget targets.
+
+> [!IMPORTANT]
+> `mix nerves.new` generates a `config/target.exs` containing
+> `{"usb0", %{type: VintageNetDirect}}`. **That interface will not come up on
+> this system**, because no gadget is composed and there is no legacy
+> `g_ether` module to load. `vintage_net` will simply find no `usb0`. Do not
+> treat it as your way onto the device — configure WiFi, or expect to use
+> UART. The generated config also lists `eth0`, which this device does not
+> have at all.
 
 The simplest route is [`vintage_net_direct`](https://hexdocs.pm/vintage_net_direct):
 
