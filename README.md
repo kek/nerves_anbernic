@@ -1,10 +1,13 @@
 # Nerves System: Anbernic RG40XXV
 
-[![Hex version](https://img.shields.io/hexpm/v/nerves_system_rg40xxv.svg "Hex version")](https://hex.pm/packages/nerves_system_rg40xxv)
-
 This is the base Nerves System configuration for the [Anbernic
 RG40XXV](https://anbernic.com/products/rg-40xxv) handheld — a 4", vertical,
 Allwinner H700 device.
+
+> [!NOTE]
+> Not published to Hex yet, so there is no version badge and no `"~> 0.1"`
+> dependency to add. Use a path or git dependency as shown below. Hex
+> publication is worth doing once someone has confirmed the thing boots.
 
 | Feature              | Description                                     |
 | -------------------- | ----------------------------------------------- |
@@ -52,10 +55,19 @@ mix nerves.new my_app
 cd my_app
 ```
 
-Add this system to `mix.exs`:
+In the generated `mix.exs`, set `@all_targets [:rg40xxv]` and replace the
+system dependency with this one:
 
 ```elixir
-{:nerves_system_rg40xxv, "~> 0.1", runtime: false, targets: :rg40xxv}
+{:nerves_system_rg40xxv,
+ path: "../nerves_anbernic", runtime: false, targets: :rg40xxv}
+```
+
+or, to pull it straight from git:
+
+```elixir
+{:nerves_system_rg40xxv,
+ github: "kek/nerves_anbernic", runtime: false, targets: :rg40xxv}
 ```
 
 Then:
@@ -66,6 +78,10 @@ mix deps.get
 mix firmware
 mix burn
 ```
+
+The first `mix firmware` builds the system itself, which takes the better
+part of an hour and needs roughly 25 GB free. Subsequent builds reuse the
+cached artifact in `~/.nerves/artifacts`.
 
 ## Flashing
 
