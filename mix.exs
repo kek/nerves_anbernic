@@ -104,6 +104,9 @@ defmodule NervesSystemRG40XXV.MixProject do
       "LICENSES/*",
       "mix.exs",
       "nerves_defconfig",
+      # Without this a change to a kernel patch would not alter the artifact
+      # checksum, so a stale cached artifact would be reused silently.
+      "patches",
       "post-build.sh",
       "post-createfs.sh",
       "README.md",
