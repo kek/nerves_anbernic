@@ -428,8 +428,8 @@ Then `mix firmware && mix burn`, writing to the slot the device boots from.
 > `CONFIG_SPL_SUNXI_LED_STATUS_GPIO=268` (PI12) is the power LED, so the SPL
 > lights it before Linux. That reasoning is sound but the conclusion is not:
 > on real hardware the LED glows a steady yellow whenever the device has
-> power, because it is the AXP717's charge indicator. It looks identical
-> whether the device booted or is wedged, and it cost hours of misdiagnosis.
+> power, because it is the AXP717's charge indicator, so it looks identical
+> whether the device booted or is wedged.
 
 The device gives no usable feedback at power-on: historically the panel was
 unsupported, so the screen stayed black on a completely healthy boot. The
