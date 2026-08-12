@@ -45,45 +45,29 @@ jobs:
             exit 1
           fi
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-
-      - name: Install nerves_bootstrap
-        run: |
-          mix local.hex --force
-          mix local.rebar --force
-          mix archive.install hex nerves_bootstrap "$NERVES_BOOTSTRAP_VERSION" --force
-
-      - name: Lint the Buildroot defconfig
-        # NERVES_ENV_DISABLED makes the :nerves_package compiler a no-op. Without
-        # it, loading this project to run the lint task builds the entire system
-        # from source first -- this job took 1h6m to lint one text file, and
-        # duplicated the work build-system already does. The linter only reads
-        # nerves_defconfig, so it needs no artifact.
-        #
-        # Note: `ensure_value: BR2_GLOBAL_PATCH_DIR` is reported as a failed
-        # check and is expected. The rule wants exactly the nerves patch dir,
-        # while we legitimately list two (nerves' plus ours). The single-argument
-        # form of the task does not set a non-zero exit status, so this stays
-        # advisory -- do not "fix" it by dropping our patch directory.
-        env:
-          NERVES_ENV_DISABLED: 1
-        run: |
-          mix deps.get
-          mix nerves.system.lint nerves_defconfig
+  # There is deliberately no separate lint job. mix nerves.system.lint cannot
+  # run without a built system: in the system's own repository Nerves.Env
+  # insists on a real NERVES_SYSTEM directory, and tolerates a missing one only
+  # when the system is a path dependency of some other project. So the old lint
+  # job spent 1h6m building the whole of Buildroot before it could lint one
+  # text file -- the build was load-bearing, not incidental -- and duplicated
+  # what build-system already does. Neither NERVES_ENV_DISABLED nor pointing
+  # NERVES_SYSTEM at an empty directory avoids it; the first trades the hour
+  # for "path which does not exist" and the second for "the system hasn't been
+  # built!". The linter therefore runs as a step of build-system below, where a
+  # system exists and it costs about a second.
+  #
+  # The consequence is that the defconfig is linted on trunk and tags but not
+  # on branches. That is the same trade build-system already makes, and the
+  # invariants that actually break an image -- partition offsets, the U-Boot
+  # environment location, the DTB name, the panel firmware -- are asserted by
+  # tools/check-consistency.sh in the checks job on every push.
 
   build-system:
     # Building Buildroot from scratch takes the better part of an hour, so
     # only do it where the result is worth having.
     if: github.ref == 'refs/heads/trunk' || github.ref_type == 'tag'
-    needs: [checks, lint]
+    needs: [checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -117,6 +101,17 @@ jobs:
         run: |
           mix deps.get
           mix compile
+
+      - name: Lint the Buildroot defconfig
+        # Cheap here because the system is already built; see the note above
+        # for why this cannot be its own job.
+        #
+        # `ensure_value: BR2_GLOBAL_PATCH_DIR` is reported as a failed check and
+        # that is expected: the rule wants exactly the nerves patch directory
+        # while we legitimately list two, nerves' and ours. The single-argument
+        # form of the task does not set a non-zero exit status, so this stays
+        # advisory -- do not "fix" it by dropping our patch directory.
+        run: mix nerves.system.lint nerves_defconfig
 
       - name: Archive the built system
         run: mix nerves.artifact
