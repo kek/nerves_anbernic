@@ -1,0 +1,86 @@
+drm/sun4i: set the DE33 global control bit the vendor sets
+
+Every DE33 register that can be compared between a working muOS and this tree
+agrees, except two -- and one of those turns out to be a symptom rather than a
+cause. This sets the one that is genuinely a configuration difference.
+
+Measured with regmap's debugfs dumps on our side and busybox devmem on the
+vendor side, on an anbernic,rg40xx-v with the screen lit:
+
+	                         vendor      ours (before)
+	0x1008100 GLOBAL_CTL     0x00000041  0x00000001
+	0x1008104 (see below)    0x00000111  0x00000100
+	0x1008108 GLOBAL_SIZE    0x01DF027F  matched
+	0x100810c GLOBAL_CLK     0x00000001  matched
+	0x1281000 BLEND_PIPE_CTL 0x00000101  matched
+	0x1281004 BLEND_BKCOLOR  0xFF000000  matched
+	0x1281008 BLEND_OUTSIZE  0x01DF027F  matched
+
+GLOBAL_CTL bit 6 is what this patch adds. Its meaning is unknown -- it is set
+by the Allwinner BSP on DE33 and not by mainline, and that is the entire
+justification. It reads back correctly afterwards.
+
+IT DOES NOT FIX THE DISPLAY. The panel still shows a uniform colour that does
+not follow the framebuffer. This is committed because matching a configuration
+known to drive this hardware is worth more than not matching it, and because
+the measurements are worth keeping.
+
+On 0x1008104, and a dead end worth recording so nobody repeats it: DE2 lays out
+the top block as GLOBAL_CTL 0x0, GLOBAL_STATUS 0x4, GLOBAL_DBUFF 0x8,
+GLOBAL_SIZE 0xc, while DE33 has GLOBAL_SIZE at 0x8 and GLOBAL_CLK at 0xc. That
+made 0x4 look like the new home of the double-buffer commit register, which
+matters because sun8i_mixer_commit() does this:
+
+	if (mixer->cfg->de_type != SUN8I_MIXER_DE33)
+		regmap_write(engine->regs, SUN8I_MIXER_GLOBAL_DBUFF, ...);
+
+i.e. DE33 never latches its shadow registers at all, which would explain the
+symptom exactly. It was tried, from both the commit path and from
+sun8i_mixer_init(), and 0x1008104 kept reading 0x00000100 even though
+GLOBAL_CTL in the same window took its new value in the same function. A write
+that does not stick where a neighbouring write does means the register is not
+writable: 0x4 is still GLOBAL_STATUS on DE33, and the vendor's 0x111 against
+our 0x100 is the DE reporting that it is running, which ours is not. A symptom.
+
+So DE33's real commit register, if it needs one, is not in the top window, and
+upstream's guard may be deliberate rather than an oversight. That question is
+still open; see HANDOFF for what has and has not been eliminated.
+
+Upstream status: not upstream, not a backport. Do not send this anywhere until
+the display actually works and it is known whether this bit matters.
+
+The diff is generated with diff(1) rather than written by hand, after three
+failed attempts at hunk arithmetic.
+--- a/drivers/gpu/drm/sun4i/sun8i_mixer.h	2026-08-09 18:25:30.000000000 +0000
++++ b/drivers/gpu/drm/sun4i/sun8i_mixer.h	2026-08-12 22:02:07.836529013 +0000
+@@ -25,6 +25,12 @@
+ #define SUN50I_MIXER_GLOBAL_CLK			0xc
+ 
+ #define SUN8I_MIXER_GLOBAL_CTL_RT_EN		BIT(0)
++/*
++ * Set by the vendor BSP on DE33 and not by mainline. Meaning unknown; it is
++ * simply the only other difference in this block against a configuration
++ * known to drive a panel.
++ */
++#define SUN50I_MIXER_GLOBAL_CTL_DE33_EN		BIT(6)
+ 
+ #define SUN8I_MIXER_GLOBAL_DBUFF_ENABLE		BIT(0)
+ 
+--- a/drivers/gpu/drm/sun4i/sun8i_mixer.c	2026-08-09 18:25:30.000000000 +0000
++++ b/drivers/gpu/drm/sun4i/sun8i_mixer.c	2026-08-12 22:02:07.836529013 +0000
+@@ -465,8 +465,13 @@
+ 	}
+ 
+ 	/* Enable the mixer */
+-	regmap_write(top_regs, SUN8I_MIXER_GLOBAL_CTL,
+-		     SUN8I_MIXER_GLOBAL_CTL_RT_EN);
++	if (mixer->cfg->de_type == SUN8I_MIXER_DE33)
++		regmap_write(top_regs, SUN8I_MIXER_GLOBAL_CTL,
++			     SUN8I_MIXER_GLOBAL_CTL_RT_EN |
++			     SUN50I_MIXER_GLOBAL_CTL_DE33_EN);
++	else
++		regmap_write(top_regs, SUN8I_MIXER_GLOBAL_CTL,
++			     SUN8I_MIXER_GLOBAL_CTL_RT_EN);
+ 
+ 	if (mixer->cfg->de_type == SUN8I_MIXER_DE33)
+ 		regmap_write(top_regs, SUN50I_MIXER_GLOBAL_CLK, 1);
