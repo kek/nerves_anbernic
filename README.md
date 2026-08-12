@@ -551,7 +551,11 @@ to add nodes in so each step gives a distinct signal. The shape:
    `sun50i-h700-anbernic-rg40xx-v-v2-panel.dts` alongside the base one.
    Whichever your unit has, the other one shows a blank or scrambled
    screen, so both need to exist and be selectable.
-3. `CONFIG_DRM_*` additions in `linux/nerves.fragment`.
+3. `CONFIG_DRM_*` additions in `linux/nerves.fragment`, plus the two
+   `.panel` firmware blobs into `/lib/firmware/panels/` — the panel timings and
+   init sequence live there, not in the device tree, and omitting them gives no
+   picture and no error. See
+   [the panel spec](docs/superpowers/specs/2026-08-12-display-panel-spec.md).
 
 None of that changes the boot chain, the image layout, or anything already
 described here.

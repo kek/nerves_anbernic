@@ -1,7 +1,7 @@
 # Plan: display support for the RG40XXV
 
 **Date:** 2026-08-12
-**Status:** Prerequisites 1 and 2 done; 3 not started
+**Status:** All three prerequisites done. Implementation not started.
 **Prerequisite:** met — the board boots, joins WiFi and is reachable over SSH
 as of `e15351a`. This plan assumes that; it would not be workable without it.
 **Expands:** the "Adding display support" section of the README, which states
@@ -121,26 +121,26 @@ reverts on every second boot. handheldgame already sets it.
 > and verify with `strings images/uboot-env.bin | grep nerves_fw_`. It is
 > commented at the `ENVIMAGE_SOURCE` line in `nerves_defconfig`.
 
-### 3. Read the panel description out of muOS's device tree
+### 3. Get the panel spec — DONE, by a better route
 
-The most valuable step, and the same technique that settled the DRAM question:
-**a firmware known to drive the hardware is ground truth in a way a downstream
-tree's generic config is not.**
+The plan here was to decompile muOS's DTB. That turned out to be unnecessary and
+would have been misleading: ROCKNIX carries the whole stack as committed source,
+and reading it revealed two things a DTB would not have shown.
 
-The muOS card boots *this* unit, so its DTB describes *this* unit's panel.
+Recorded in `2026-08-12-display-panel-spec.md`. The two findings that change the
+work:
 
-```bash
-# locate the boot partition on the muOS card, then for its board DTB:
-dtc -I dtb -O dts <board>.dtb > muos.dts
-sed -n '/panel/,/};/p' muos.dts        # compatible, timings, reset/enable GPIOs
-sed -n '/backlight/,/};/p' muos.dts    # PWM channel, period, brightness levels
-sed -n '/tcon\|de2\|mixer/,/};/p' muos.dts
-```
+- **The panel description is a firmware blob**, `/lib/firmware/panels/<compatible>.panel`,
+  carrying the timings *and* the init sequence. There is no `panel-timing` node
+  anywhere. Kernel patches plus device tree, without those files in the rootfs,
+  gives no picture and no obvious error.
+- **Both variants are 640x480 @ 60 Hz with identical blanking.** They differ in
+  init sequence, sync polarity (inverted) and pixel-clock edge. So `modetest`
+  reporting the right mode does **not** confirm the right panel, and a scrambled
+  image means wrong *variant* rather than wrong timings.
 
-Record the result in this repo as the spec for step 3 below, and note which of
-the two panel variants it corresponds to. Cross-check something independently
-known — as the extracted 672 MHz DRAM clock agreeing with upstream confirmed
-that struct offset — before trusting the rest.
+Only 7 of ROCKNIX's 23 H700 patches are display-related, so this is a smaller
+job than the README's "roughly 23 patches" suggests.
 
 ## Step sequence
 
@@ -151,21 +151,27 @@ skipping ahead makes failures ambiguous.
 |---|---|---|
 | 1 | Patch series only, no DT nodes | Kernel still boots; drivers present via `modinfo`. No regression |
 | 2 | TCON + DE2 / mixer nodes | `/sys/class/drm/card0` exists; `modetest` lists a CRTC. **Screen still black — this is progress** |
-| 3 | Panel node | Connector reports `connected`; reported mode matches the extracted timings |
-| 4 | Backlight (H616 PWM) | Actual light |
+| 3 | `.panel` blobs into `/lib/firmware/panels/` | Nothing visible yet, but step 4 cannot work without them |
+| 4 | `spi_lcd` + `reg_lcd` + panel node | Connector `connected`, mode 640x480 @ 60 Hz. **Does not prove the variant is right** |
+| 5 | Backlight (H616 PWM, PD28) | Actual light |
 
 Do step 1 as its own upload and confirm no regression before adding any nodes.
 A display patch series that breaks something unrelated is much easier to spot
 against a known-good boot than tangled with new DT.
 
-**The diagnostic split that matters most** is between steps 3 and 4, because
-they are the two most often conflated:
+**The diagnostic split that matters most** is between steps 4 and 5, because
+they are the two most often conflated. Read it with the panel spec in hand:
 
-- correct mode reported, screen black → backlight or panel init sequence
-- scrambled image, correct mode → timings
-- no connector at all → the panel node is not binding; step 3 is not done
+- no connector at all → the panel node is not binding; step 4 is not done
+- correct mode, screen black → backlight (step 5), or the `.panel` blob is
+  missing so no init sequence ran
+- correct mode, scrambled or rolling image → **wrong panel variant**, not wrong
+  timings. Both variants report 640x480 @ 60 Hz; they differ in sync polarity
+  and init sequence. Switch the `compatible` to the other one, which is a
+  one-line change and a single upload.
 
-Check connector status and mode *before* touching timings.
+Since the mode looks identical either way, resist reading a correct mode as
+confirmation of anything beyond "the pipeline is configured".
 
 ## Patch hygiene
 
