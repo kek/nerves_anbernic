@@ -1,7 +1,15 @@
 # Nerves support for the Anbernic RG40XXV
 
 **Date:** 2026-08-11
-**Status:** Approved, in implementation
+**Status:** Implemented and confirmed on hardware
+
+> [!NOTE]
+> **Corrected after bring-up.** This spec asserted LPDDR4 DRAM and treated
+> upstream's H700 U-Boot defconfig as usable as-is. Both were wrong, and it
+> was the one place the "package variant of the H616, sibling of the RG35XX"
+> premise broke. The RAM row and the U-Boot paragraph below are corrected in
+> place; the reasoning that led there is left intact because it was sound
+> given what was known. See "What bring-up actually found" in the README.
 
 ## Goal
 
@@ -19,7 +27,7 @@ LCD is explicitly out of scope; see "Display" below for why, and
 | | |
 |---|---|
 | SoC | Allwinner H700 (quad Cortex-A53, Mali-G31 MP2) |
-| RAM | 1 GB LPDDR4 @ 672 MHz |
+| RAM | 1 GB **LPDDR3** @ 672 MHz (this spec originally said LPDDR4) |
 | Storage | MicroSD |
 | PMIC | X-Powers AXP717 |
 | Display | 4" 640x480, RGB/DPI-SPI panel |
@@ -57,10 +65,18 @@ H616 PWM controller driver, and a sun4i "RGB connector as DSI" hack.
 `rocknix-joypad` analog-mux tweak, `uart5`, an RGB LED on PI7, and a
 panel compatible string.
 
-**U-Boot** — `configs/anbernic_rg35xx_h700_defconfig` is upstream and
-generic across the H700 Anbernics: LPDDR4 DRAM timings at 672 MHz,
-AXP717 over R_I2C, SPL status LED. Requires ATF BL31 for
+**U-Boot** — `configs/anbernic_rg35xx_h700_defconfig` is upstream and was
+assumed here to be generic across the H700 Anbernics: LPDDR4 DRAM timings at
+672 MHz, AXP717 over R_I2C, SPL status LED. Requires ATF BL31 for
 `sun50i_h616`.
+
+The AXP717 and SPL LED parts are indeed reusable. **The DRAM timings are
+not** — that defconfig is for the RG35XX, whose memory differs. Applying its
+LPDDR4 configuration to the RG40XXV hangs the SPL during DRAM init with no
+outward sign whatsoever. The RG40XXV needs
+`CONFIG_SUNXI_DRAM_H616_LPDDR3`; the working values were extracted from the
+vendor boot0 of a muOS card. There is no RG40XXV defconfig upstream to
+import. See `uboot/uboot.defconfig`.
 
 ## Design
 
@@ -106,7 +122,8 @@ thing to check on device.
 SPL  →  ATF BL31 (sun50i_h616)  →  U-Boot 2026.04  →  sysboot  →  Linux
 ```
 
-U-Boot is built with the upstream H700 DRAM/PMIC values and a Nerves
+U-Boot is built with the upstream H700 PMIC values, RG40XXV-specific
+LPDDR3 DRAM values (see the note above), and a Nerves
 environment that implements A/B selection and revert-on-unvalidated. It
 boots via `sysboot`, reading `/boot/extlinux/extlinux-{a,b}.conf` out of
 the squashfs rootfs — no FAT boot partition.

@@ -6,16 +6,20 @@ Allwinner H700 device.
 
 > [!NOTE]
 > Not published to Hex yet, so there is no version badge and no `"~> 0.1"`
-> dependency to add. Use a path or git dependency as shown below. Hex
-> publication is worth doing once someone has confirmed the thing boots.
+> dependency to add. Use a path or git dependency as shown below.
+
+This has been **confirmed working on a physical RG40XXV**: it boots, joins
+WiFi on 5 GHz, and is reachable over SSH. Getting there took four fixes that
+are worth knowing about before you change anything here — see
+"[What bring-up actually found](#what-bring-up-actually-found)".
 
 | Feature              | Description                                     |
 | -------------------- | ----------------------------------------------- |
 | CPU                  | Allwinner H700, quad Cortex-A53 @ 1.5 GHz       |
-| Memory               | 1 GB LPDDR4                                     |
+| Memory               | 1 GB LPDDR3 @ 672 MHz — **not** LPDDR4, see below |
 | Storage              | MicroSD                                         |
 | Linux kernel         | 6.18.x mainline                                 |
-| IEx terminal         | `ttyS0` (UART0), or USB gadget serial           |
+| IEx terminal         | `ttyS0` (UART0, internal pads), or SSH over WiFi |
 | GPIO, I2C, SPI       | Yes, via [circuits](https://github.com/elixir-circuits) |
 | WiFi                 | RTL8821CS, mainline `rtw88_8821cs`              |
 | Bluetooth            | RTL8821CS, `btrtl` + H5/3-wire                  |
@@ -108,34 +112,33 @@ fwup _build/rg40xxv_dev/nerves/images/my_app.fw -d /dev/rdiskN
 The RG40XXV has no pin header, so plan how you will talk to it before you
 flash.
 
-### USB gadget (recommended)
+### WiFi (recommended)
 
-Mainline sets the H700's `usbotg` node to `dr_mode = "peripheral"`, so the
-USB-C port can present a network interface and a serial console over the
-charging cable. The kernel here is built with `USB_CONFIGFS`, `..._ECM`,
-`..._RNDIS`, and `..._ACM`, but nothing composes a gadget at boot — that is
-the application's job, as on other Nerves gadget targets.
+This is the route that has actually been made to work. See the WiFi section
+below and step 1 of "Verifying it on a device" — bake credentials and an SSH
+host key into the image before you flash.
+
+### USB gadget (does not currently work)
+
+> [!WARNING]
+> Do not plan on reaching the device this way. It has been attempted and the
+> host never enumerates the gadget. Details in "Known limitations"; the short
+> version is that the phy ends up in `USB_DR_MODE_HOST` because the AXP717's
+> type-C role switch has no device tree binding.
+
+Mainline sets the H700's `usbotg` node to `dr_mode = "peripheral"`, and the
+kernel here is built with `USB_CONFIGFS`, `..._ECM`, `..._RNDIS` and
+`..._ACM`, so the pieces are present. Nothing composes a gadget at boot —
+that is the application's job, as on other Nerves gadget targets. Composing
+one via configfs does succeed: `usb0` appears and `vintage_net_direct`
+assigns it an address. It just never connects to the host.
 
 > [!IMPORTANT]
 > `mix nerves.new` generates a `config/target.exs` containing
 > `{"usb0", %{type: VintageNetDirect}}`. **That interface will not come up on
-> this system**, because no gadget is composed and there is no legacy
-> `g_ether` module to load. `vintage_net` will simply find no `usb0`. Do not
-> treat it as your way onto the device — configure WiFi, or expect to use
-> UART. The generated config also lists `eth0`, which this device does not
-> have at all.
-
-The simplest route is [`vintage_net_direct`](https://hexdocs.pm/vintage_net_direct):
-
-```elixir
-config :vintage_net,
-  config: [
-    {"usb0", %{type: VintageNetDirect}}
-  ]
-```
-
-with `nerves_pack` in your deps. You then get `ssh` to the device over the
-USB cable.
+> this system** unless your application composes a gadget, and even then it
+> will not carry traffic. The generated config also lists `eth0`, which this
+> device does not have at all.
 
 ### UART0
 
@@ -155,10 +158,11 @@ image. Configure it from your application the usual way with
 
 ## Verifying it on a device
 
-Nothing here has been confirmed on a physical RG40XXV. This is the
-procedure to do that. The awkward part is that the device has no pin
-header, so **you have to bake your way in before you flash** — there is no
-console to fall back on if you forget.
+This procedure has been run on a physical RG40XXV and the device now boots,
+joins WiFi and answers SSH. It is still worth following on a new unit or after
+changing the system, because most of it is unexercised by CI. The awkward part
+is that the device has no pin header, so **you have to bake your way in before
+you flash** — there is no console to fall back on if you forget.
 
 ### 1. Bake in WiFi and SSH before flashing
 
@@ -189,21 +193,33 @@ Then `mix firmware && mix burn`, writing to the slot the device boots from.
 > first, or use a spare — the stock card is also your control experiment if
 > the device shows no signs of life.
 
-### 2. Power on and watch the power LED
+### 2. Power on
 
-This is the only feedback available without a console, and it is more
-informative than it looks. `uboot/uboot.defconfig` sets
-`CONFIG_SPL_SUNXI_LED_STATUS_GPIO=268`, which is PI12 — the same pin
-mainline's device tree uses for the power LED. So the **SPL** lights that
-LED, long before Linux.
+> [!WARNING]
+> **Do not read anything into the LED at power-on.** An earlier version of
+> this document offered an LED-based triage tree on the reasoning that
+> `CONFIG_SPL_SUNXI_LED_STATUS_GPIO=268` (PI12) is the power LED, so the SPL
+> lights it before Linux. That reasoning is sound but the conclusion is not:
+> on real hardware the LED glows a steady yellow whenever the device has
+> power, because it is the AXP717's charge indicator. It looks identical
+> whether the device booted or is wedged, and it cost hours of misdiagnosis.
 
-- **LED lights** → the BROM read sector 16, accepted the image, and ran our
-  SPL. Card layout and bootloader are fine; anything wrong is later.
-- **LED never lights** → the SPL never ran. Wrong card slot, a bad write,
-  or the BROM rejected the image. Nothing about Linux is implicated yet.
-- **LED lights but nothing else happens** → SPL ran but DRAM init or
-  U-Boot failed. Suspect the DRAM timings in `uboot/uboot.defconfig`, which
-  are upstream's generic H700 values. This is the case that needs UART.
+The device gives no usable feedback at power-on: the panel is unsupported
+(see above), so the screen stays black on a completely healthy boot. Your
+application can create a signal by pointing the LEDs at the kernel's
+heartbeat trigger once it starts, which is worth doing — a blinking LED then
+means kernel up, BEAM up, application supervision tree up:
+
+```elixir
+File.write("/sys/class/leds/green:status/trigger", "heartbeat")
+```
+
+`/sys/class/leds` has `green:power`, `green:status`, `rgb:indicator` and
+`rtw88-mmc1:0001:1`. This needs no kernel changes; `CONFIG_LEDS_GPIO` and
+`CONFIG_LEDS_TRIGGER_HEARTBEAT` are already built in.
+
+Until the application runs, use FEL instead of guessing — see
+"[Debugging without a console](#debugging-without-a-console)".
 
 ### 3. Get in
 
@@ -282,18 +298,128 @@ cmd "fw_printenv nerves_fw_active"
 
 ### 6. If it never gets far enough to SSH
 
-Then you need UART0 — `ttyS0`, 115200 8N1, 3.3V logic, on internal test
-pads, which means opening the case. Two things make that more useful:
+See "Debugging without a console" below. Every bug found during bring-up was
+diagnosed that way; opening the case for UART was never necessary.
+
+UART0 remains the fullest option if you want it — `ttyS0`, 115200 8N1, 3.3V
+logic, on internal test pads. Two changes make it more useful, and both need
+a system rebuild, so make them before your first build if you expect to need
+them:
 
 - Drop `quiet` and add `earlycon` to the `append` line in
-  `rootfs_overlay/boot/extlinux/extlinux-a.conf` to get early kernel output.
+  `rootfs_overlay/boot/extlinux/extlinux-a.conf` for early kernel output.
+  Bare `earlycon` resolves because the device tree sets
+  `chosen/stdout-path = "serial0:115200n8"`.
 - Set `CONFIG_BOOTDELAY=1` in `uboot/uboot.defconfig` so you can interrupt
-  U-Boot and get a prompt. It is 0 here for fast boot, which is the wrong
-  trade-off while bringing a board up. From a U-Boot prompt you can
-  `printenv`, `ls mmc 0:2 /boot`, and boot by hand.
+  U-Boot. It is 0 here for fast boot, which is the wrong trade-off while
+  bringing a board up.
 
-Both need a system rebuild, so if you expect to need UART, make the changes
-before the first build rather than after.
+## Debugging without a console
+
+The device has no display, no pin header, and the LED tells you nothing. Three
+techniques cover the whole boot chain without opening it.
+
+**FEL, for anything before Linux.** The H700's BROM exposes Allwinner's USB
+recovery protocol, which lives in mask ROM and therefore works even when
+nothing on the card boots. Power on with **no SD card** and connect USB-C:
+
+```bash
+sunxi-fel -l                     # the H700 reports as H616, SoC ID 0x1823
+sunxi-fel spl images/u-boot-sunxi-with-spl.bin   # runs our SPL, which inits DRAM
+sunxi-fel readl 0x40000000       # DRAM answers => init succeeded
+sunxi-fel writel 0x40000000 0xcafebabe
+sunxi-fel readl 0x40000000       # round-trips => DRAM is genuinely usable
+```
+
+This is how the LPDDR3 bug was found. A device that vanishes from USB after
+`spl` has hung the SoC in DRAM init. Write two addresses 1 MB apart and read
+the first back to check for aliasing, which indicates wrong geometry rather
+than wrong timings — that failure mode boots the SPL happily and corrupts
+Linux later.
+
+**Card breadcrumbs, for userland.** There is ~17 MB of unallocated space
+between the U-Boot environment (ends block 8448) and rootfs A (block 43008).
+An application can write diagnostics there with a plain `File.write` to
+`/dev/mmcblk0` at a block offset, then you power off and read it on a host
+with `dd`. Combined with `RingLogger`, that yields the complete boot log —
+kernel messages included, because `nerves_logging` feeds kmsg into Logger.
+Prefer this over the U-Boot environment: a bad write there stops the device
+booting, whereas this region is only touched by a full re-flash.
+
+**The card itself records two boot facts**, readable with `dd` and no
+instrumentation at all:
+
+- `nerves_fw_booted` in the U-Boot environment at `0x400000` flips 0 → 1 the
+  first time `bootcmd` runs. It is deliberately shipped as 0 for this reason.
+- The application data partition is written as `0xff` by fwup and reformatted
+  to f2fs on first boot. f2fs magic at block 1615872 + 1024 therefore proves
+  the kernel ran and reached erlinit's mount stage.
+
+Together those two bracket the failure: environment untouched means U-Boot
+never ran; environment updated but partition still `0xff` means the kernel
+never started; both changed means the failure is in userland.
+
+## What bring-up actually found
+
+Four things, none of which were visible from source review.
+
+**1. The board is LPDDR3, not LPDDR4.** This is the important one.
+`configs/anbernic_rg35xx_h700_defconfig` upstream specifies
+`CONFIG_SUNXI_DRAM_H616_LPDDR4`, and this system copied it verbatim on the
+premise that the H700 Anbernics share a PCB family. They do not share memory.
+With LPDDR4 timings the SPL hangs in DRAM init and the SoC stops responding
+entirely — no console, no LED, indistinguishable from a dead device.
+
+The correct values came from the **vendor boot0 on a muOS card** that boots
+this hardware. Its `dram_para` struct at offset `0x38` declares
+`dram_type = 7` (LPDDR3) and carries different drive-strength and ODT values,
+while agreeing with upstream on the 672 MHz clock — which is what confirmed
+the struct offset had been read correctly:
+
+```bash
+sudo dd if=/dev/rdiskN bs=512 skip=16 count=256 of=boot0.bin
+# then read u32s from 0x38: clk, type, dx_odt, dx_dri, ca_dri, odt_en
+```
+
+If you ever doubt an inherited hardware parameter, that is the technique: a
+firmware known to boot the hardware is ground truth in a way a sibling
+board's defconfig is not. See the comment in `uboot/uboot.defconfig`, which
+also records that the TPR field ordering is *inferred* rather than confirmed
+against a struct definition.
+
+**2. `pwrseq_simple` aborts instead of using its own GPIO fallback.** On 6.18
+it demands a reset controller whenever a node has exactly one `reset-gpios`
+entry, and returns early when it cannot get one, skipping the GPIO path
+directly below it. Our WiFi node has `reset-gpios` and no `resets`, so mmc1
+never initialised and `wlan0` never existed. Fixed by
+`patches/linux/0001-mmc-pwrseq_simple-gpio-reset-fallback.patch`.
+
+**3. `CONFIG_IP_ADVANCED_ROUTER` and `CONFIG_IP_MULTIPLE_TABLES` were
+missing.** vintage_net gives each interface its own routing table, so without
+them `VintageNet.RouteManager` crashes moments after DHCP succeeds. The
+symptom is WiFi that associates, obtains a lease, deauthenticates "by local
+choice", and loops — present and configured but never reachable.
+
+**4. The LED is a charge indicator**, not a boot signal. See the warning in
+step 2.
+
+## Known limitations
+
+- **No display.** By design — see the top of this file.
+- **No software power-off.** `CONFIG_INPUT_AXP20X_PEK` is not set and no
+  power-key node exists, so Linux never sees the power button and holding it
+  does nothing. Press reset and pull the card. Fixable by enabling the PMIC
+  power key, or by mapping a gamepad combo (`/dev/input/event0` *is*
+  registered) to `Nerves.Runtime.poweroff/0`.
+- **USB gadget networking does not connect.** The gadget binds and `usb0` gets
+  an address, but the phy logs `Changing dr_mode to 1` (`USB_DR_MODE_HOST`) so
+  the host never enumerates it. The board DTS notes that the AXP717's type-C
+  role switch is not described by any binding. WiFi works, so this has not
+  been chased.
+- **`nerves_ssh` cannot generate host keys on OTP 29** (ssh 6.0.3): the daemon
+  dies with `{:error, "No host key available"}` and then crashes in
+  `:ssh_system_sup.stop_system(nil)`. Ship host keys in your application's
+  `rootfs_overlay` and point `:nerves_ssh`'s `system_dir` at them.
 
 ### What to report back
 
@@ -347,10 +473,11 @@ checks; it advises adding `e2fsprogs`, which this system deliberately omits
 because the application partition is f2fs and `f2fs-tools` is what
 `nerves_runtime` needs to reformat it.
 
-What none of that proves is that the hardware comes up: the DRAM timings,
-the button GPIO mapping, and USB gadget behaviour are all inherited on the
-reasonable-but-unconfirmed premise that the RG40XXV matches its siblings.
-Treat the checklist above as the remaining half of the work.
+That half is now joined by hardware confirmation: the device boots, joins
+WiFi and answers SSH. The "matches its siblings" premise held for the PMIC,
+mmc0, the gamepad and WiFi — and broke for DRAM, which is the whole story of
+the next section. The button GPIO mapping is still unexercised, and USB
+gadget networking does not work (see "Known limitations").
 
 ## Building the system from source
 
