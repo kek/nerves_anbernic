@@ -523,7 +523,11 @@ Two things here are easy to get wrong and worth knowing about:
 
 ## Adding display support
 
-Deliberately deferred, and structured so it is additive:
+Deliberately deferred, and structured so it is additive. There is a working
+plan for it in
+[`docs/superpowers/specs/2026-08-12-display-support-plan.md`](docs/superpowers/specs/2026-08-12-display-support-plan.md),
+covering the develop/test loop, what to set up before starting, and the order
+to add nodes in so each step gives a distinct signal. The shape:
 
 1. A `linux/display/` patch series: the H616 PWM controller driver,
    `panel-mipi-dpi-spi`, and the sun4i RGB-connector change.
