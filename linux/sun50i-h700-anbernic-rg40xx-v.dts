@@ -130,16 +130,33 @@
 		 * where this panel's timings AND its init sequence live.
 		 * There is no panel-timing node anywhere by design.
 		 *
-		 * This unit is believed to be the v1 panel -- muOS's vendor
-		 * DT names it fog_fj035fhd05_v1. That is an inference from
-		 * the vendor's _v1 suffix lining up with ROCKNIX's -v2-panel
-		 * naming, not a proof. Both variants report 640x480 @ 60 Hz
-		 * with identical blanking, so a correct mode confirms
-		 * nothing about the variant. They differ in init sequence and
-		 * sync polarity, so the failure signature of guessing wrong
-		 * is a scrambled or blank image at a correct mode -- in which
-		 * case switch this one string to "anbernic,rg40xx-v2-panel"
-		 * and rebuild. Both blobs ship.
+		 * The variant, and how it was narrowed down on hardware.
+		 *
+		 * v1 was tried first, because muOS's vendor DT names this
+		 * panel fog_fj035fhd05_v1. It gave a **blank screen with the
+		 * backlight on** -- and the pipeline was demonstrably fine
+		 * underneath: the connector read connected at 640x480, the
+		 * blob loaded, all three components bound, and the clock tree
+		 * showed tcon-data-clock running at 27 MHz. So the panel was
+		 * being fed pixels and simply not displaying them, which means
+		 * its controller never took the init sequence.
+		 *
+		 * That plus the owner's own experience -- ROCKNIX, whose
+		 * rg40xx-v default is the v1 panel, showed nothing on this
+		 * unit either, while muOS works -- says the vendor's "_v1" and
+		 * ROCKNIX's "-v2-panel" do not refer to the same revision
+		 * split. So this is v2.
+		 *
+		 * If this is ever wrong, the tell is unchanged: both variants
+		 * report 640x480 @ 60 Hz with identical blanking, so a correct
+		 * mode confirms nothing. They differ in init sequence and sync
+		 * polarity. Blank or scrambled at a correct mode means the
+		 * other variant; both blobs ship, and it is this one string.
+		 *
+		 * A note on reading the log: the v1 blob adds a second mode,
+		 * 640x480 @ 120 Hz, and the v2 blob does not. Two modelines in
+		 * dmesg therefore tells you which *file* was loaded -- not
+		 * which panel is soldered on.
 		 *
 		 * What muOS independently confirms is the wiring, not the
 		 * variant: its lcd_gpio_0..4 are PI9, PI10, PI8, PI14, PI15,
@@ -162,7 +179,7 @@
 		 * prebuilt vendor kernel and not in any MustardOS repository.
 		 */
 		panel: panel@0 {
-			compatible = "anbernic,rg40xx-panel", "panel-mipi-dpi-spi";
+			compatible = "anbernic,rg40xx-v2-panel", "panel-mipi-dpi-spi";
 			reg = <0>;
 
 			spi-max-frequency = <3125000>;

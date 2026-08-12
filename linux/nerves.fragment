@@ -96,6 +96,30 @@ CONFIG_SPI_GPIO=y
 # The generic panel driver from patches/linux/0101. It reads this panel's
 # timings and init sequence from /lib/firmware/panels/*.panel at probe time;
 # DRM_PANEL_MIPI depends on BACKLIGHT_CLASS_DEVICE and selects DRM_MIPI_DBI.
+#
+# This MUST stay a module, and it will NOT autoload. Both halves were
+# established on hardware and are easy to get wrong:
+#
+#   * It cannot be built in. request_firmware() runs at probe, which for a
+#     built-in driver is during initcalls -- before the kernel mounts the root
+#     filesystem in prepare_namespace(). Tried it; the result is
+#     "Direct firmware load for panels/... failed with error -2" at 1.7 s and
+#     no /sys/class/drm/card0 at all. ROCKNIX gets away with building it in
+#     because Batocera ships an initramfs; this system deliberately has none
+#     (CONFIG_BLK_DEV_INITRD is unset, so erlinit is PID 1 out of the squashfs).
+#
+#   * It cannot autoload. The SPI core derives a device's modalias from the
+#     first compatible string minus its vendor prefix, so this panel announces
+#     itself as "spi:rg40xx-v2-panel" (read it back from
+#     /sys/bus/spi/devices/spi0.0/modalias). The driver only advertises
+#     panel-mipi-dpi-spi, so nothing matches. Reordering the compatible strings
+#     is not an option either -- the driver builds the firmware filename out of
+#     the first one.
+#
+# So rootfs_overlay/etc/erlinit.config loads it explicitly, after the rootfs is
+# available and before the BEAM starts. The failure this avoids is a nasty one:
+# every other driver binds, /sys/class/backlight appears, and there is still no
+# card0, because sun4i's component master cannot complete without the panel.
 CONFIG_DRM_PANEL_MIPI=m
 CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_GPIO=m

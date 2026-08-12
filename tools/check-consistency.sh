@@ -190,6 +190,27 @@ for f in rootfs_overlay/boot/extlinux/extlinux-a.conf rootfs_overlay/boot/extlin
         || fail "$(basename "$f") is missing console=tty0"
 done
 
+# The panel driver is loaded explicitly by erlinit, because it can neither be
+# built in (request_firmware runs before the rootfs is mounted) nor autoload
+# (the SPI modalias is derived from the panel's own compatible string, not the
+# driver's). Both were established on hardware. If this line is lost the screen
+# stops working, and the symptom points somewhere else entirely: every other
+# display driver still binds and /sys/class/backlight still appears, but there
+# is no /sys/class/drm/card0.
+if grep -q '^--pre-run-exec .*modprobe panel-mipi' rootfs_overlay/etc/erlinit.config; then
+    ok "erlinit loads the panel driver before starting the BEAM"
+else
+    fail "erlinit.config does not modprobe panel-mipi -- the screen will stay dark"
+fi
+
+# And the module has to exist to be loaded, which means not built in.
+if grep -q '^CONFIG_DRM_PANEL_MIPI=m' linux/linux-6.18.defconfig; then
+    ok "the panel driver is a module, as the firmware load requires"
+else
+    fail "CONFIG_DRM_PANEL_MIPI must be =m; built in, request_firmware runs"
+    fail "before the rootfs is mounted and the panel never probes"
+fi
+
 echo
 if [ "$rc" -eq 0 ]; then echo "Image layout is self-consistent"; else echo "CONSISTENCY CHECK FAILED"; fi
 exit $rc
