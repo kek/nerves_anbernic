@@ -129,6 +129,13 @@ CONFIG_TRANSPARENT_HUGEPAGE=y
 CONFIG_NET=y
 CONFIG_PACKET=y
 CONFIG_IP_MULTICAST=y
+# Required by vintage_net, which gives every interface its own routing table so
+# it can prioritise them. Without these, `ip route add ... table 102` fails with
+# "RTNETLINK answers: Operation not supported", VintageNet.RouteManager crashes,
+# and the interface is torn down moments after DHCP succeeds -- WiFi associates,
+# gets a lease, then deauthenticates in a loop and is never reachable.
+CONFIG_IP_ADVANCED_ROUTER=y
+CONFIG_IP_MULTIPLE_TABLES=y
 CONFIG_IP_PNP=y
 CONFIG_IP_PNP_DHCP=y
 CONFIG_IP_PNP_BOOTP=y
