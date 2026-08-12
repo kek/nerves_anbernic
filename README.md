@@ -26,28 +26,125 @@ five fixes that are worth knowing about before you change anything here — see
 | Gamepad              | All buttons + volume keys as evdev              |
 | Battery / charger    | AXP717, via `/sys/class/power_supply`           |
 | Audio                | Speakers + headphone jack with detect           |
-| **Display**          | **Not supported — see below**                   |
+| **Display**          | **Described, not yet confirmed on hardware**    |
 
-## The display does not work, on purpose
+## The display, and what is actually known about it
 
-The 4" LCD is **not supported by this system**, and neither is HDMI.
+The 4" LCD is now described end to end — kernel patches, device tree, panel
+firmware — but **it has not yet been confirmed to light up**. Everything below
+distinguishes what is verified from what is not, because on this board "no
+picture" covers at least four unrelated failures and the screen is the thing
+under test.
 
-This is a limitation of upstream Linux rather than a bug here. As of 6.18
-there is no display support for *any* Allwinner H700 board: there is no
-`panel-mipi-dpi-spi` driver in `drivers/gpu/drm/panel`, and no mainline H700
-board device tree describes a panel, TCON, or DE2 node. Getting a picture
-requires the out-of-tree stack that ROCKNIX carries — an in-flight generic
-MIPI/DPI-SPI panel driver, an H616 PWM driver for the backlight, and a sun4i
-"RGB connector as DSI" change — roughly 23 kernel patches.
+The pipeline is:
 
-Carrying that stack means rebasing it on every kernel bump, which is a real
-ongoing cost. This system deliberately does not take it on yet, so that
-everything it *does* claim rests on plain mainline. See
-`docs/superpowers/specs/2026-08-11-nerves-rg40xxv-design.md` for the full
-reasoning, and "Adding display support" below for how it would land.
+```
+mixer0 -> tcon_top -> tcon_lcd0 -> panel   (RGB888 pixels + SPI init sequence)
+```
 
-The GPU is not disabled — `panfrost` builds and the Mali node is enabled —
-there is simply no display to put it on.
+Verified without hardware: the patch series applies cleanly to 6.18.44 in the
+real Buildroot flow; the kernel builds; the DTB compiles with no new `dtc`
+warnings and passes fourteen pipeline assertions in `tools/check-dts.sh`;
+`panel-mipi.ko`, `sun4i-drm.ko`, `sun4i-tcon.ko`, `sun8i-mixer.ko`,
+`sun8i_tcon_top.ko` and `gpio_backlight.ko` are all built; and both panel
+blobs are installed in the target rootfs.
+
+Not verified: that any of it produces light.
+
+### This is a smaller job than it used to be
+
+The design notes and the older text here said "roughly 23 kernel patches",
+following ROCKNIX. That is out of date. **6.18.44 already carries the H616
+DE33 mixer and its clocks** — `allwinner,sun50i-h616-de33-mixer-0` and
+`-de33-clk` are upstream, and `sun8i-mixer.ko` was already being built before
+any of this. What is genuinely missing upstream is the TCON support, the panel
+driver, and the device tree.
+
+So this tree carries **four** patches, not seven and not twenty-three, in
+`patches/linux/0100`–`0103`. Each has a header explaining its upstream status.
+
+ROCKNIX also carries a *newer* refactor that moves plane handling out of the
+mixer into a separate `sun50i_planes` driver. That is deliberately **not**
+taken: 6.18.44 implements DE33 planes inside the mixer, and adopting ROCKNIX's
+version would mean reverting working upstream code. The visible consequence is
+in the device tree — the mixer node uses upstream's binding,
+`reg-names = "layers", "top", "display"`, and must *not* have a separate
+`planes@` node. Both are asserted by `tools/check-dts.sh`, because getting it
+wrong yields a mixer that probes and a screen that stays dark.
+
+### The panel description is a firmware blob
+
+The generic panel driver carries no panel data. It builds a filename from the
+panel node's first `compatible` string and reads **both the timings and the
+controller init sequence** out of `/lib/firmware/panels/<compatible>.panel`.
+There is no `panel-timing` node anywhere; do not look for one.
+
+A correct kernel and a correct device tree, without that blob, give **no
+picture and no error**. Both variants ship in
+`rootfs_overlay/lib/firmware/panels/`, and `tools/check-consistency.sh`
+asserts that the spelling in the DTS matches a file that exists, since nothing
+checks it at build time.
+
+### Which panel this unit has
+
+`anbernic,rg40xx-panel`, on the strength of muOS naming this hardware's panel
+`fog_fj035fhd05_v1`. That is an **inference**, not a proof: it assumes the
+vendor's `_v1` and ROCKNIX's `-v2-panel` refer to the same revision split.
+
+It is cheap to falsify. Both variants report 640×480 @ 60 Hz with identical
+blanking, so *a correct mode confirms nothing about the variant*. They differ
+in init sequence and sync polarity, so guessing wrong looks like a scrambled or
+absent image **at a correct mode** — in which case change one string in the DTS
+to `anbernic,rg40xx-v2-panel` and rebuild.
+
+### Backlight: GPIO, not PWM
+
+`gpio-backlight` holds PD28 high, which is full brightness. The backlight is
+really PWM-driven — muOS runs it at 50 kHz — but the H616 PWM controller has no
+mainline driver and carrying the out-of-tree one costs about 1900 lines of
+patch for brightness control alone. ROCKNIX's own series drives it as a plain
+GPIO before switching to PWM, so this buys first light for nothing.
+
+PD28 is the right pin from two directions: muOS's vendor DT for this device
+sets `lcd_pwm_ch = 0` and muxes `pwm0` onto PD28, and PD28 is the only pin in
+6.18.44's H616 pinctrl carrying a `pwm0` function.
+
+### muOS is the reference, not ROCKNIX
+
+muOS demonstrably drives this panel. Its vendor DT for `rg40xx-v` independently
+confirms the wiring — `lcd_gpio_0..4` are PI9, PI10, PI8, PI14, PI15, exactly
+the SPI clock, MOSI, chip select, reset and panel supply used here.
+
+Where the two disagree is timings, and muOS's are the proven ones:
+
+| | muOS (vendor) | ROCKNIX (`.panel`) |
+|---|---|---|
+| Pixel clock | 24 MHz | 27 MHz |
+| Total | 768 × 521 | 750 × 600 |
+| Refresh | 59.98 Hz | 60.00 Hz |
+
+Since timings live in the blob rather than the device tree, preferring muOS's
+means authoring a `.panel` file. That is the documented fallback if ROCKNIX's
+blob gives a picture that is present but wrong. The init sequence cannot be got
+from muOS at all — it lives in Anbernic's prebuilt vendor kernel, not in any
+MustardOS repository.
+
+### The screen is now a console
+
+`CONFIG_DRM_FBDEV_EMULATION` and `CONFIG_FRAMEBUFFER_CONSOLE` are on, and both
+`extlinux` configs pass `console=tty0` with no `quiet`. This matters beyond
+graphics: this board has no usable console — UART0 is on internal test pads —
+so until now the only way to see why a boot failed was reading raw card
+sectors. See "[Debugging without a console](#debugging-without-a-console)",
+most of which this obsoletes once the panel is confirmed.
+
+HDMI is still not described. The SoC nodes exist upstream and ROCKNIX
+describes the connector, but nothing here needs it and every node left out is
+one that cannot fail.
+
+The GPU is not disabled — `panfrost` builds and the Mali node is enabled.
+`panfrost … error -110` in `dmesg` was a deferred-probe timeout in the headless
+build and may now clear; do not chase it before the panel works.
 
 ## Getting started
 
@@ -228,8 +325,11 @@ Then `mix firmware && mix burn`, writing to the slot the device boots from.
 > power, because it is the AXP717's charge indicator. It looks identical
 > whether the device booted or is wedged, and it cost hours of misdiagnosis.
 
-The device gives no usable feedback at power-on: the panel is unsupported
-(see above), so the screen stays black on a completely healthy boot. Your
+The device gives no usable feedback at power-on: historically the panel was
+unsupported, so the screen stayed black on a completely healthy boot. The
+display is now described and the kernel log is routed to it, which should
+replace most of this section — but that is unconfirmed on hardware, so treat
+everything below as still current until someone has watched it boot. Your
 application can create a signal by pointing the LEDs at the kernel's
 heartbeat trigger once it starts, which is worth doing — a blinking LED then
 means kernel up, BEAM up, application supervision tree up:
@@ -448,7 +548,11 @@ missing binding was not the problem; two drivers contending for one phy was.
 
 ## Known limitations
 
-- **No display.** By design — see the top of this file.
+- **The display is described but unconfirmed.** It builds and passes every
+  static check; nobody has yet seen it light up. See the top of this file for
+  what is verified and what is not.
+- **No HDMI.** The SoC nodes are upstream but nothing here describes the
+  connector.
 - **No software power-off.** `CONFIG_INPUT_AXP20X_PEK` is not set and no
   power-key node exists, so Linux never sees the power button and holding it
   does nothing. Press reset and pull the card. Fixable by enabling the PMIC
@@ -480,8 +584,13 @@ bootloader chain is wired up rather than merely configured.
 Buildroot inside the real kernel tree* was decompiled and checked: model
 `Anbernic RG40XX V`, compatible `anbernic,rg40xx-v`, the `led-rgb` node
 merged into mainline's unlabelled `leds` node, the RTL8821CS `wifi@1` node
-inherited, 17 button nodes, and no panel node.
-`tools/check-dts.sh` reruns this standalone against a fresh kernel tree.
+inherited, and 17 button nodes. It also checks the whole display pipeline —
+display engine, DE33 bus and clocks, mixer, TCON TOP, TCON LCD, panel, its
+generic fallback, the bit-banged SPI command channel, the backlight and the
+RGB888 pinmux — and asserts the mixer uses upstream's three-window binding
+with no ROCKNIX `planes@` node, since that combination probes cleanly and
+still gives a dark screen. `tools/check-dts.sh` reruns this standalone
+against a fresh kernel tree.
 
 **The kernel has the drivers.** Every symbol `linux/nerves.fragment` asks
 for survives `olddefconfig`, and 41 boot-critical drivers are asserted
@@ -564,29 +673,36 @@ Two things here are easy to get wrong and worth knowing about:
   update changes U-Boot or the environment layout, re-flash the card rather
   than running `mix upload` / `mix firmware.burn --task upgrade`.
 
-## Adding display support
+## Confirming the display
 
-Deliberately deferred, and structured so it is additive. There is a working
-plan for it in
-[`docs/superpowers/specs/2026-08-12-display-support-plan.md`](docs/superpowers/specs/2026-08-12-display-support-plan.md),
-covering the develop/test loop, what to set up before starting, and the order
-to add nodes in so each step gives a distinct signal. The shape:
+The parts listed as future work here are now in the tree; see "The display, and
+what is actually known about it" at the top. What is left is looking at the
+screen, and reading the result correctly. The plan in
+[`docs/superpowers/specs/2026-08-12-display-support-plan.md`](docs/superpowers/specs/2026-08-12-display-support-plan.md)
+still describes the loop and the panel spec is in
+[the panel spec](docs/superpowers/specs/2026-08-12-display-panel-spec.md);
+both predate the discovery that the DE33 mixer is already upstream, so their
+patch counts are too high.
 
-1. A `linux/display/` patch series: the H616 PWM controller driver,
-   `panel-mipi-dpi-spi`, and the sun4i RGB-connector change.
-2. Panel nodes in the board DTS, plus a `-v2-panel` variant — the RG40XXV
-   shipped with two different panels, which is why ROCKNIX carries
-   `sun50i-h700-anbernic-rg40xx-v-v2-panel.dts` alongside the base one.
-   Whichever your unit has, the other one shows a blank or scrambled
-   screen, so both need to exist and be selectable.
-3. `CONFIG_DRM_*` additions in `linux/nerves.fragment`, plus the two
-   `.panel` firmware blobs into `/lib/firmware/panels/` — the panel timings and
-   init sequence live there, not in the device tree, and omitting them gives no
-   picture and no error. See
-   [the panel spec](docs/superpowers/specs/2026-08-12-display-panel-spec.md).
+`mix upload`, reboot, then read it in this order. Each line distinguishes
+failures that look identical on the device:
 
-None of that changes the boot chain, the image layout, or anything already
-described here.
+| Observation | Meaning |
+|---|---|
+| No `/sys/class/drm/card0` | The display engine or TCON never bound. Start at `dmesg \| grep -i "sun4i\|tcon\|mixer\|de2"` |
+| `card0` exists, no connector | The panel node is not binding — check `dmesg` for `panel-mipi` and for a `request_firmware` failure on `panels/anbernic,rg40xx-panel.panel` |
+| Connector reports 640×480 @ 60 Hz, screen black | Backlight, or the init sequence never ran. Check `/sys/class/backlight/` exists and that the blob loaded |
+| Correct mode, scrambled or rolling | **Wrong panel variant.** One string in the DTS; see above. Not wrong timings |
+| Correct mode, correct image | Done. Update the hardware table and delete the hedging at the top of this file |
+
+`libdrm`'s test tools ship for exactly this: `modetest` enumerates connectors,
+CRTCs and modes and can draw a test pattern without the application running.
+
+Because `console=tty0` is on the kernel command line, a successful boot should
+also put the kernel log on the panel — which is the cheapest possible proof,
+requiring no userspace at all.
+
+None of this changed the boot chain or the image layout.
 
 ## Licensing and provenance
 

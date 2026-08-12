@@ -5,22 +5,23 @@
 Initial release: headless Nerves support for the Anbernic RG40XXV
 (Allwinner H700).
 
-Built on mainline Linux 6.18 with no out-of-tree kernel patches. The board
-device tree extends mainline's `sun50i-h700-anbernic-rg35xx-plus.dts`, so
-the AXP717 PMIC, battery and USB power supplies, MicroSD, gamepad and volume
-buttons, LEDs, audio codec, USB, RTL8821CS WiFi and Bluetooth all come from
-upstream.
+Built on Linux 6.18. The board device tree extends mainline's
+`sun50i-h700-anbernic-rg35xx-plus.dts`, so the AXP717 PMIC, battery and USB
+power supplies, MicroSD, gamepad and volume buttons, LEDs, audio codec, USB,
+RTL8821CS WiFi and Bluetooth all come from upstream.
+
+Six kernel patches are carried, in `patches/linux/`: two found during bring-up
+(an SDIO reset fallback that WiFi needs, and a USB phy mode fix that the USB
+gadget needs), and four for the display.
 
 Boot chain is SPL → ATF BL31 (`sun50i_h616`) → U-Boot 2026.04 → `sysboot`,
 with A/B rootfs partitions and revert support.
 
-Known limitation: the 4" LCD and HDMI are not supported, because mainline
-has no display support for any H700 board. See the README.
+The device boots, joins WiFi, and answers SSH over both WiFi and the USB-C
+cable. Five separate bugs had to be fixed to get there; the README's "What
+bring-up actually found" records them.
 
-On-device boot is unverified — no hardware was available. Verified instead:
-the system builds; the DTB Buildroot produces describes the expected
-hardware; the kernel carries the drivers; and `mix firmware` yields a `.fw`
-whose applied image has the SPL where the BROM looks for it, the expected
-partition table, a gzip squashfs U-Boot can read, and a correct A/B U-Boot
-environment. See "How this was verified" in the README and the hardware
-checklist alongside it.
+The 4" LCD is described end to end — patches, device tree and panel firmware —
+but is **not yet confirmed to light up**. HDMI is not described at all. See
+"The display, and what is actually known about it" in the README for what is
+verified and what is not, and for how to read the result.
