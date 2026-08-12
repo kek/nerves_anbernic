@@ -114,9 +114,20 @@ flash.
 
 ### WiFi (recommended)
 
-This is the route that has actually been made to work. See the WiFi section
-below and step 1 of "Verifying it on a device" — bake credentials and an SSH
-host key into the image before you flash.
+This is the route that has actually been made to work. `wpa_supplicant`,
+`wireless-regdb` and the `rtw88` firmware are all in the image; configure it
+from your application with `vintage_net_wifi`.
+
+Two things to get right, both of which cost time to discover — see step 1 of
+"Verifying it on a device" for the full config:
+
+- **Set a real `regulatory_domain`.** The generated config ships `"00"`, the
+  world domain, which marks most 5 GHz channels no-initiate-radiation. A
+  5 GHz-only network is then scanned but never joined, which looks exactly
+  like a wrong password.
+- **Bake in an SSH host key.** `nerves_ssh` cannot generate one on OTP 29
+  (see "Known limitations"), so without this the daemon never starts and the
+  device is unreachable even with working WiFi.
 
 ### USB gadget (does not currently work)
 
@@ -142,19 +153,16 @@ assigns it an address. It just never connects to the host.
 
 ### UART0
 
-`ttyS0` is UART0 on the PH pins, which is where the kernel's
-`stdout-path` points and where `erlinit` puts IEx by default. On these
-handhelds it is on internal test pads, so it means opening the case and
-soldering. It is the right tool for diagnosing a board that does not boot
-far enough to bring up USB.
+`ttyS0` is UART0 on the PH pins, which is where the kernel's `stdout-path`
+points and where `erlinit` puts IEx by default. On these handhelds it is on
+internal test pads, so it means opening the case and soldering.
 
 Settings are 115200 8N1.
 
-### WiFi
-
-`wpa_supplicant`, `wireless-regdb`, and the `rtw88` firmware are all in the
-image. Configure it from your application the usual way with
-`vintage_net_wifi`.
+It is the fullest view of a board that will not boot, but it was **not needed**
+during bring-up — every bug there was diagnosed over FEL and the SD card
+instead. Try "[Debugging without a console](#debugging-without-a-console)"
+before reaching for a soldering iron.
 
 ## Verifying it on a device
 
@@ -314,6 +322,12 @@ them:
   U-Boot. It is 0 here for fast boot, which is the wrong trade-off while
   bringing a board up.
 
+### What to report back
+
+If something fails, the useful details are: which stage above it reached, the
+full `dmesg`, and `cat /proc/device-tree/model`. Those three narrow it down to
+bootloader, device tree, or driver almost immediately.
+
 ## Debugging without a console
 
 The device has no display, no pin header, and the LED tells you nothing. Three
@@ -421,16 +435,12 @@ step 2.
   `:ssh_system_sup.stop_system(nil)`. Ship host keys in your application's
   `rootfs_overlay` and point `:nerves_ssh`'s `system_dir` at them.
 
-### What to report back
-
-If something fails, the useful details are: which stage above it reached,
-the full `dmesg`, and `cat /proc/device-tree/model`. Those three narrow it
-down to bootloader, device tree, or driver almost immediately.
-
 ## How this was verified
 
-No RG40XXV was available while building this, so **on-device boot is
-unverified**. Everything short of that is:
+On-device boot **is** confirmed — see the top of this file. What follows is the
+build-time verification reached *before* any hardware was available. It is kept
+because CI still enforces all of it on every change, and because the gap between
+it and reality turned out to be the instructive part:
 
 **The system builds.** A full Buildroot build completes and produces
 `bl31.bin`, `Image`, `sun50i-h700-anbernic-rg40xx-v.dtb`,
@@ -473,11 +483,16 @@ checks; it advises adding `e2fsprogs`, which this system deliberately omits
 because the application partition is f2fs and `f2fs-tools` is what
 `nerves_runtime` needs to reformat it.
 
-That half is now joined by hardware confirmation: the device boots, joins
-WiFi and answers SSH. The "matches its siblings" premise held for the PMIC,
-mmc0, the gamepad and WiFi — and broke for DRAM, which is the whole story of
-the next section. The button GPIO mapping is still unexercised, and USB
-gadget networking does not work (see "Known limitations").
+**What all of that missed is the useful part.** Every artifact above was
+well-formed and internally consistent, and none of those checks predicted any
+of the four things that actually stopped the board — a DRAM type, a driver's
+early-return, two absent kernel symbols, and the colour of a LED. Well-formed
+is not the same as correct, and the distance between them is the size of the
+hardware you do not have.
+
+The "matches its siblings" premise held for the PMIC, mmc0, the gamepad and
+WiFi, and broke for DRAM. Of the inherited assumptions, the button GPIO mapping
+is the one still unexercised.
 
 ## Building the system from source
 

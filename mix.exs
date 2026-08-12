@@ -76,7 +76,17 @@ defmodule NervesSystemRG40XXV.MixProject do
 
   defp docs do
     [
-      extras: ["README.md", "CHANGELOG.md"],
+      # The specs are extras so that links to them from the README resolve.
+      # ExDoc checks such links against the generated doc set rather than the
+      # filesystem, so a markdown link to a file that is not listed here is
+      # reported as missing even when it exists.
+      extras: [
+        "README.md",
+        "CHANGELOG.md",
+        "docs/superpowers/specs/2026-08-11-nerves-rg40xxv-design.md",
+        "docs/superpowers/specs/2026-08-12-display-support-plan.md"
+      ],
+      groups_for_extras: [Design: ~r"docs/superpowers/specs/"],
       main: "readme",
       source_ref: "v#{@version}",
       source_url: @source_url,
