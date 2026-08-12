@@ -9,9 +9,11 @@ Allwinner H700 device.
 > dependency to add. Use a path or git dependency as shown below.
 
 This has been **confirmed working on a physical RG40XXV**: it boots, joins WiFi
-on 5 GHz, and answers SSH over both WiFi and the USB-C cable. Getting there took
-five fixes that are worth knowing about before you change anything here — see
-"[What bring-up actually found](#what-bring-up-actually-found)".
+on 5 GHz, answers SSH over both WiFi and the USB-C cable, and drives the 4"
+panel. Getting there took five fixes that are worth knowing about before you
+change anything here — see "[What bring-up actually
+found](#what-bring-up-actually-found)" — plus a sixth for the display, which is
+described in the next section.
 
 | Feature              | Description                                     |
 | -------------------- | ----------------------------------------------- |
@@ -26,7 +28,7 @@ five fixes that are worth knowing about before you change anything here — see
 | Gamepad              | All buttons + volume keys as evdev              |
 | Battery / charger    | AXP717, via `/sys/class/power_supply`           |
 | Audio                | Speakers + headphone jack with detect           |
-| **Display**          | **Pipeline works; panel shows no image yet**    |
+| Display              | 4" 640×480 panel, DRM/KMS + framebuffer console |
 
 ## The display, and what is actually known about it
 
@@ -62,6 +64,13 @@ no log line when it is wrong.
 
 ### What is measured, on hardware
 
+- **The framebuffer console is visible on the panel.**
+- `TCON_TOP_PORT_SEL` (`0x651001c`) reads `0x20`, matching a muOS that drives
+  this panel correctly. It read `0x22` while the screen was blank.
+- The mixer's global status (`0x1008104`) reads `0x111`, again matching muOS.
+  **Bit 0 is the frame-end latch**, and it re-arms after each write-1-to-clear,
+  so the display engine is completing frames. It read `0x100` — bit 0 never
+  set — for as long as the routing was wrong.
 - `/sys/class/drm/card0` and `card0-DSI-1` exist; `/dev/fb0` exists.
 - Connector `connected`, `enabled`, DPMS `On`, mode 640×480, physical size
   81×61 mm (read out of the panel blob).
@@ -75,14 +84,6 @@ no log line when it is wrong.
 - DRM atomic state: `plane-1` attached to `crtc-0` with fbcon's `XR24`
   640×480 buffer, pitch 2560. No errors anywhere in dmesg — no SPI warnings,
   no DRM warnings.
-
-- The framebuffer console is visible on the panel.
-- `TCON_TOP_PORT_SEL` (`0x651001c`) reads `0x20`, matching a muOS that drives
-  this panel correctly. It read `0x22` while the screen was blank.
-- The mixer's global status (`0x1008104`) reads `0x111`, again matching muOS.
-  **Bit 0 is the frame-end latch**, and it re-arms after each write-1-to-clear,
-  so the display engine is completing frames. It read `0x100` — bit 0 never
-  set — for as long as the routing was wrong.
 
 ### How it was found, and what that ruled out along the way
 
