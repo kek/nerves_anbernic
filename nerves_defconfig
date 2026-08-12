@@ -59,6 +59,18 @@ BR2_PACKAGE_ALSA_UTILS=y
 BR2_PACKAGE_ALSA_UTILS_APLAY=y
 BR2_PACKAGE_ALSA_UTILS_AMIXER=y
 BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
+
+# libdrm's test programs, for the same reason: there is no display support yet,
+# but "no picture" covers several unrelated failures and none of them can be
+# told apart by looking at the device. modetest enumerates connectors, CRTCs and
+# modes and can draw a test pattern, which is what distinguishes "DRM never
+# bound" from "bound but dark". See
+# docs/superpowers/specs/2026-08-12-display-support-plan.md.
+#
+# No per-GPU option is selected: those build vendor userspace libraries
+# (libdrm_intel and friends), while modetest uses the generic KMS ioctls.
+BR2_PACKAGE_LIBDRM=y
+BR2_PACKAGE_LIBDRM_INSTALL_TESTS=y
 BR2_PACKAGE_LINUX_FIRMWARE=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT=y
@@ -87,6 +99,16 @@ BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
 BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="u-boot-sunxi-with-spl.bin"
 BR2_PACKAGE_HOST_UBOOT_TOOLS=y
 BR2_PACKAGE_HOST_UBOOT_TOOLS_ENVIMAGE=y
+# NOTE: Buildroot depends on this path but not on the file's contents, so
+# editing uboot/uboot.env does NOT regenerate images/uboot-env.bin on an
+# incremental build -- it silently keeps the old environment. After changing
+# it, force the regeneration:
+#
+#     make host-uboot-tools-rebuild && make
+#
+# and confirm with `strings images/uboot-env.bin | grep nerves_fw_`. Note too
+# that the environment reaches a device only via fwup's `complete` task, so
+# installing a changed one takes a `mix burn`, not a `mix upload`.
 BR2_PACKAGE_HOST_UBOOT_TOOLS_ENVIMAGE_SOURCE="${NERVES_DEFCONFIG_DIR}/uboot/uboot.env"
 BR2_PACKAGE_HOST_UBOOT_TOOLS_ENVIMAGE_SIZE="131072"
 BR2_NERVES_SYSTEM_NAME="nerves_system_rg40xxv"

@@ -1,7 +1,7 @@
 # Plan: display support for the RG40XXV
 
 **Date:** 2026-08-12
-**Status:** Planned, not started
+**Status:** Prerequisites 1 and 2 done; 3 not started
 **Prerequisite:** met — the board boots, joins WiFi and is reachable over SSH
 as of `e15351a`. This plan assumes that; it would not be workable without it.
 **Expands:** the "Adding display support" section of the README, which states
@@ -68,9 +68,9 @@ log; that happened once already.
 
 ## Prerequisites, before writing any display code
 
-### 1. Add libdrm with its test tools
+### 1. Add libdrm with its test tools — DONE
 
-There is currently no way to inspect DRM state on-device. Adding the display
+There was no way to inspect DRM state on-device. Adding the display
 stack without this repeats the mistake of shipping a button-test procedure on
 an image with no `evtest`.
 
@@ -79,23 +79,47 @@ BR2_PACKAGE_LIBDRM=y
 BR2_PACKAGE_LIBDRM_INSTALL_TESTS=y
 ```
 
-`modetest` then enumerates connectors, CRTCs and modes, and can draw a test
-pattern — which is the only cheap way to tell "DRM never bound" from "bound but
-dark". Consider `fbset` too, and `kmscube` later once panfrost matters.
+Now in `nerves_defconfig`, and the image carries `modetest`, `proptest` and
+`modeprint` in `/usr/bin`. `modetest` enumerates connectors, CRTCs and modes and
+can draw a test pattern — the cheap way to tell "DRM never bound" from "bound
+but dark". No per-GPU option is set: those build vendor userspace libraries,
+while `modetest` uses the generic KMS ioctls.
 
-### 2. Turn on revert protection
+Still optional: `fbset`, and `kmscube` once panfrost matters.
 
-`uboot/uboot.env` currently sets `nerves_fw_autovalidate=1`, so an update
-validates itself immediately and a kernel that **fails to boot will not
-revert** — which means back to card swapping, the exact thing this loop avoids.
+### 2. Turn on revert protection — DONE
 
-Either set `nerves_fw_autovalidate=0` in `uboot/uboot.env` (needs one final
-`mix burn`, because the environment block is only written by the fwup `complete`
-task), or set it at runtime from the device via `Nerves.Runtime.KV` and skip the
-burn. Then have the application set `nerves_fw_validated=1` once it is up.
+`uboot/uboot.env` used to set `nerves_fw_autovalidate=1`, which made the A/B
+revert machinery a no-op: `nerves_init` marked new firmware valid on its first
+boot whether or not the system came up, so a kernel that failed to boot left
+the device recoverable only by re-flashing.
 
-After that, uploading an experimental kernel is safe: an unvalidated boot falls
-back to the other rootfs partition on its own.
+It is now `0`. The rest of the chain was already in place — the fwup upgrade
+tasks set `nerves_fw_validated=0` when they apply an update, and `nerves_init`
+reverts on `booted=1` with `validated=0`.
+
+**Something must do the validating.** `nerves_runtime`'s `StartupGuard` does,
+and only once every OTP application has started, so enable it in the
+application:
+
+```elixir
+config :nerves_runtime, startup_guard_enabled: true
+```
+
+Without that (or a direct `Nerves.Runtime.validate_firmware/0` call) the device
+reverts on every second boot. handheldgame already sets it.
+
+> [!IMPORTANT]
+> **This takes one `mix burn` to install.** The environment reaches a device
+> only through fwup's `complete` task, so a `mix upload` will not carry it. Do
+> that burn *before* starting display work — the whole point is to make the
+> kernel uploads that follow recoverable.
+>
+> Two traps found while making this change. Buildroot depends on the *path* of
+> `uboot/uboot.env` but not its contents, so editing it does not regenerate
+> `images/uboot-env.bin`; force it with `make host-uboot-tools-rebuild && make`
+> and verify with `strings images/uboot-env.bin | grep nerves_fw_`. It is
+> commented at the `ENVIMAGE_SOURCE` line in `nerves_defconfig`.
 
 ### 3. Read the panel description out of muOS's device tree
 
