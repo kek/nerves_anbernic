@@ -26,15 +26,65 @@ five fixes that are worth knowing about before you change anything here — see
 | Gamepad              | All buttons + volume keys as evdev              |
 | Battery / charger    | AXP717, via `/sys/class/power_supply`           |
 | Audio                | Speakers + headphone jack with detect           |
-| **Display**          | **Described, not yet confirmed on hardware**    |
+| **Display**          | **Pipeline works; panel shows no image yet**    |
 
 ## The display, and what is actually known about it
 
-The 4" LCD is now described end to end — kernel patches, device tree, panel
-firmware — but **it has not yet been confirmed to light up**. Everything below
-distinguishes what is verified from what is not, because on this board "no
-picture" covers at least four unrelated failures and the screen is the thing
-under test.
+The 4" LCD pipeline **works and is confirmed on hardware**. The panel does
+**not yet show an image**: it displays a uniform colour that does not change
+when the framebuffer is written. Everything below distinguishes what is
+measured from what is not, because on this board "no picture" covers at least
+four unrelated failures and the screen is the thing under test.
+
+### What is measured, on hardware
+
+- `/sys/class/drm/card0` and `card0-DSI-1` exist; `/dev/fb0` exists.
+- Connector `connected`, `enabled`, DPMS `On`, mode 640×480, physical size
+  81×61 mm (read out of the panel blob).
+- dmesg: blob `loaded successfully`; all three components bound (`mixer`,
+  `tcon-top`, `lcd-controller`); `[drm] Initialized sun4i-drm`;
+  `Console: switching to colour frame buffer device 80x30`.
+- Clock tree: `tcon-lcd0` enabled at 81 MHz with **`tcon-data-clock` at
+  27 MHz** — the TCON really is clocking pixels out.
+- `vdd-lcd` (the PI15 rail) and `vcc-io` (bank D) both enabled; **backlight
+  physically lit**, so `gpio-backlight` on PD28 and active-high are both right.
+- DRM atomic state: `plane-1` attached to `crtc-0` with fbcon's `XR24`
+  640×480 buffer, pitch 2560. No errors anywhere in dmesg — no SPI warnings,
+  no DRM warnings.
+
+### What is wrong, and what that rules out
+
+Writing a full screen of solid red into `/dev/fb0` — the very buffer DRM says
+it is scanning out — does not change what the panel shows. So:
+
+- **The SPI command channel works.** The v1 blob gave a blank screen and the v2
+  blob gives a uniform colour; the panel's behaviour changed when the init
+  sequence changed. That also means the SPI pin *roles* are right, which was
+  the least-evidenced part of the wiring.
+- **The panel is not the problem, and neither is DRM.** Every software-visible
+  layer is correct. Pixels are being clocked at the right rate with the right
+  timings, and the panel is receiving a constant value rather than frame data.
+- **So the fault is in the DE→TCON data path, below what DRM can see.**
+
+The prime suspect is upstream's DE33 mixer support itself. Mainline has the
+DE33 mixer and clock drivers but **no H616 display device tree at all** — not
+even in master — so that code path has never been exercised by an upstream
+board. ROCKNIX carries a *newer* refactor of the same author's work that moves
+plane handling out of the mixer into a separate `sun50i_planes` driver, and
+ROCKNIX's stack is the one with field evidence behind it. This tree chose
+upstream's mixer on the principle of not reverting working upstream code (see
+`patches/linux/0100`'s header); the evidence above suggests that principle
+picked the wrong side here, because the upstream code may be incomplete without
+the plane split rather than merely older.
+
+**Next step, therefore: adopt ROCKNIX's planes driver** — the `sun50i_planes`
+driver plus its `sun8i_mixer`, `sun8i_vi_layer` and `ccu-sun8i-de2` changes,
+and its device tree layout with a separate `planes@100000` node and the mixer
+carrying only its `display` and `top` windows. That is roughly seven hunks that
+0100 deliberately dropped. The register windows themselves are already known
+good: `top` is `0x8100`/`0x40` and `display` is `0x280000`/`0x20000`, which
+match `sun8i_top_regmap_config` (`max_register 0x3c`) and
+`sun8i_disp_regmap_config` (`0x20000`) exactly.
 
 The pipeline is:
 
@@ -87,15 +137,27 @@ checks it at build time.
 
 ### Which panel this unit has
 
-`anbernic,rg40xx-panel`, on the strength of muOS naming this hardware's panel
-`fog_fj035fhd05_v1`. That is an **inference**, not a proof: it assumes the
-vendor's `_v1` and ROCKNIX's `-v2-panel` refer to the same revision split.
+`anbernic,rg40xx-v2-panel`, and the DTS says so.
 
-It is cheap to falsify. Both variants report 640×480 @ 60 Hz with identical
-blanking, so *a correct mode confirms nothing about the variant*. They differ
-in init sequence and sync polarity, so guessing wrong looks like a scrambled or
-absent image **at a correct mode** — in which case change one string in the DTS
-to `anbernic,rg40xx-v2-panel` and rebuild.
+v1 was tried first, on the strength of muOS naming this hardware's panel
+`fog_fj035fhd05_v1`. It produced a blank screen. v2 produces a uniform colour
+instead — a different result, which is how we know the init sequence reaches
+the panel at all. Since ROCKNIX's `rg40xx-v` default *is* the v1 panel and it
+also shows nothing on this unit while muOS works, the vendor's `_v1` and
+ROCKNIX's `-v2-panel` evidently do not refer to the same revision split.
+
+Neither variant produces an image yet, so this is not settled — but it is no
+longer a coin flip, and it is one string to change back.
+
+Two traps when reading the log here:
+
+- Both variants report 640×480 @ 60 Hz with identical active area, so **a
+  correct mode confirms nothing about the variant.** What differs is the init
+  sequence, the sync polarity (v2 `0x5` = PHSYNC|PVSYNC against v1 `0x0a` =
+  NHSYNC|NVSYNC) and the reset/init delays.
+- The v1 blob adds a second mode, 640×480 @ 120 Hz, and v2 does not. Two
+  modelines in dmesg therefore tells you which **file** loaded — not which
+  panel is soldered on.
 
 ### Backlight: GPIO, not PWM
 
@@ -548,9 +610,11 @@ missing binding was not the problem; two drivers contending for one phy was.
 
 ## Known limitations
 
-- **The display is described but unconfirmed.** It builds and passes every
-  static check; nobody has yet seen it light up. See the top of this file for
-  what is verified and what is not.
+- **The display pipeline works but the panel shows no image.** DRM comes up,
+  the backlight lights, and the TCON clocks pixels at 27 MHz, but the panel
+  displays a uniform colour that does not follow the framebuffer. The suspect
+  is upstream's DE33 mixer, which no upstream board exercises. See the top of
+  this file for the measurements and the proposed next step.
 - **No HDMI.** The SoC nodes are upstream but nothing here describes the
   connector.
 - **No software power-off.** `CONFIG_INPUT_AXP20X_PEK` is not set and no
@@ -689,11 +753,35 @@ failures that look identical on the device:
 
 | Observation | Meaning |
 |---|---|
-| No `/sys/class/drm/card0` | The display engine or TCON never bound. Start at `dmesg \| grep -i "sun4i\|tcon\|mixer\|de2"` |
-| `card0` exists, no connector | The panel node is not binding — check `dmesg` for `panel-mipi` and for a `request_firmware` failure on `panels/anbernic,rg40xx-panel.panel` |
-| Connector reports 640×480 @ 60 Hz, screen black | Backlight, or the init sequence never ran. Check `/sys/class/backlight/` exists and that the blob loaded |
+| No `/sys/class/drm/card0` | Almost always the panel driver, not the display engine. `panel_mipi` cannot autoload and cannot be built in, so check that `erlinit.config` still has its `--pre-run-exec` modprobe. sun4i's component master cannot complete without the panel, so `/sys/class/backlight` appearing while `card0` does not is exactly this |
+| `card0` exists, no connector | The panel node is not binding — check `dmesg` for `panel-mipi` and for a `request_firmware` failure on `panels/anbernic,rg40xx-v2-panel.panel` |
+| Correct mode, screen black | Backlight, or the init sequence never ran. Check `/sys/class/backlight/backlight` exists and that the blob loaded |
+| Correct mode, uniform colour that ignores the framebuffer | **Where this tree is now.** Write a screen of solid red into `/dev/fb0` and see whether it changes; if not, the DE→TCON path is not carrying frame data and the panel is not at fault. See the DE33 discussion at the top |
 | Correct mode, scrambled or rolling | **Wrong panel variant.** One string in the DTS; see above. Not wrong timings |
 | Correct mode, correct image | Done. Update the hardware table and delete the hedging at the top of this file |
+
+Useful commands, all of which took a while to work out. SSH into this device
+runs **Elixir, not a shell**, so `System.cmd` needs absolute paths and `uname`
+is not even on `PATH`:
+
+```elixir
+# The pixel clock -- proof the TCON is scanning out at all. debugfs is not
+# mounted by default.
+System.cmd("/bin/mount", ["-t", "debugfs", "none", "/sys/kernel/debug"])
+File.read!("/sys/kernel/debug/clk/clk_summary")      # look for tcon-data-clock
+
+# What DRM believes it is doing: plane, framebuffer, format, CRTC, mode.
+File.read!("/sys/kernel/debug/dri/0/state")
+
+# Does anything reach the panel? Solid red, XRGB8888.
+File.write("/dev/fb0", :binary.copy(<<0, 0, 255, 0>>, 640 * 480))
+```
+
+`modetest` needs stdin held open or it drops the mode as it exits:
+
+```
+sleep 300 | modetest -M sun4i-drm -s 53:640x480
+```
 
 `libdrm`'s test tools ship for exactly this: `modetest` enumerates connectors,
 CRTCs and modes and can draw a test pattern without the application running.
