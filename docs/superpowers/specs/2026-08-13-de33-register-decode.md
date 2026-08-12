@@ -186,19 +186,124 @@ architecturally correct rather than an oversight, and direct register writes are
 a legitimate way to drive this hardware. **That is one fewer explanation for the
 symptom**, not a new lead.
 
+## The blender comparison was incomplete, and two registers were mislabelled
+
+The round-two comparison concluded that "the blender is programmed identically
+to a configuration that drives this panel". It read three registers at
+`0x1281000`, `0x1281004` and `0x1281008`. Against both mainline's macros and the
+vendor's `struct bld_reg`, only the first of those three is what it was called:
+
+| Address | Called | Actually |
+|---|---|---|
+| `0x1281000` | `BLEND_PIPE_CTL` | correct — pipe enables (bits 8+) and fill-colour enables (bits 0+) |
+| `0x1281004` | `BLEND_BKCOLOR` | **`BLEND_ATTR_FCOLOR(0)`** — pipe 0's *fill* colour |
+| `0x1281008` | `BLEND_OUTSIZE` | **`BLEND_ATTR_INSIZE(0)`** — pipe 0's *input* size |
+
+The real ones are further along, and **none of the three has ever been read on
+either side**:
+
+| Address | Register | Expected here |
+|---|---|---|
+| `0x1281080` | `BLEND_ROUTE` | `0x1` |
+| `0x1281088` | `BLEND_BKCOLOR` | `0xFF000000` |
+| `0x128108C` | `BLEND_OUTSIZE` | `0x01DF027F` |
+
+One conclusion has to be withdrawn as a result. The claim that "the vendor's
+background colour is **black**, so the uniform green is not a configured
+background" was read off `0x1281004`, which is pipe 0's fill colour, not the
+background. The background colour register at `0x1281088` is still unmeasured on
+both sides, so that argument does not currently hold — it may well survive
+re-measurement, but it has not been made yet.
+
+`BLEND_ROUTE` is the interesting one of the three. Four bits per pipe select
+which blender *port* feeds it, and mainline writes the **logical** channel index
+(`route |= layer->channel << (zpos << 2)`). That looks like a candidate bug —
+physical channels here are 0, 6, 7, 8 — but it is correct, and the vendor's own
+constant proves it. `0xa980` at `0x1008028` is `PORT02CHN`, four bits per port:
+
+| Port | Nibble | Channel |
+|---|---|---|
+| 0 | `0x0` | VI 0 (physical 0) |
+| 1 | `0x8` | UI 0 (physical 6, written as `phy_chn + 2`) |
+| 2 | `0x9` | UI 1 (physical 7) |
+| 3 | `0xa` | UI 2 (physical 8) |
+
+So port index and logical channel index coincide by construction, and routing a
+pipe to "channel 1" reaches physical channel 6 through that mapping. Mainline's
+magic constant and its route arithmetic agree with the vendor exactly.
+
+## The rest of the register map is validated against the vendor
+
+Everything below was checked offset by offset against the BSP structs, and
+matches. Only the **top block** diverges between DE2 and DE33 — and there,
+mainline's reuse of the DE2 clock tables happens to land on the right bits
+because mixer0 is bit 0 under both layouts.
+
+- **Blender.** `struct bld_reg` puts `rout_ctl` at `0x80`, `premul_ctl` `0x84`,
+  `bg_color` `0x88`, `out_size` `0x8c`, colour key at `0xb0`/`0xb4`, `0xc0`,
+  `0xe0`. Mainline's macros are identical. Its pipe-attribute stride of `0x10`
+  matches `struct bld_pipe_attr`, and the `en` register overlaying `attr[0]`'s
+  first word is why `PIPE_CTL` sits at offset 0.
+- **Channel addressing.** `map[ch] * 0x20000 + 0x1000` is exactly the vendor's
+  `DE_CHN_OFFSET(phy_chn) + CHN_OVL_OFFSET`.
+- **UI layer registers.** `struct ovl_u_lay_reg` is ctl, size, coord, pitch,
+  top_laddr, bot_laddr, fcolor over a `0x20` stride, then `top_haddr` `0x80`,
+  `bot_haddr` `0x84`, `win_size` `0x88`. Mainline's `SUN8I_MIXER_CHAN_UI_*`
+  macros match byte for byte.
+
+The one difference worth noting is pipe count: DE33 has **six** blender pipes
+(`pipe0_en`..`pipe5_en` at bits 8–13), while mainline's
+`SUN8I_MIXER_BLEND_PIPE_CTL_EN_MSK` is `GENMASK(12, 8)` — five. Harmless with a
+single plane on pipe 0, and worth remembering only if more planes are used.
+
+## Which plane is actually being scanned out
+
+`sun8i_ui_layer_init_one()` makes **UI index 0 the primary plane**, and its
+channel is `vi_num + index` = **logical channel 1**, i.e. physical channel 6. So
+fbcon's `XR24` buffer is a UI layer, not the video layer, and its registers are
+at `0x11C1000`. The video channel at `0x1101000` is unused by both sides.
+
 ## What to measure next, in order
 
 One `devmem <addr> 32` each on muOS with the screen lit, against regmap debugfs
 (or busybox `devmem`, still worth adding) on this image. All are single reads in
 windows already known to respond.
 
-1. **`0x1008010`** — the DE→TCON mux. Never read on either side.
-2. **`0x11C1000`** and the words after it — the UI channel-0 overlay block, on
-   both sides. Look for a plausible framebuffer address (`0x4xxxxxxx`). This is
-   the first point where "does the DE have the pixels" becomes directly
-   checkable, and the previous session was guessing at the base; it is now
-   derived.
-3. **`0x1008008`** — the MBUS clock, to confirm the accident above.
+**The UI layer block is the priority.** It has never been read on either side,
+and it is where "does the display engine even have the pixels" becomes a direct
+question. Expected values here are derived from mainline's source for fbcon's
+640×480 `XR24` buffer at pitch 2560:
+
+| Address | Register | Expected here |
+|---|---|---|
+| `0x11C1000` | layer 0 `ATTR` | bit 0 set (layer enabled), format field `XRGB8888` at bits 8–12 |
+| `0x11C1004` | layer 0 `SIZE` | `0x01DF027F` |
+| `0x11C1008` | layer 0 `COORD` | `0x00000000` |
+| `0x11C100C` | layer 0 `PITCH` | `0x00000A00` (2560) |
+| `0x11C1010` | layer 0 `TOP_LADDR` | **a framebuffer address, `0x4xxxxxxx`** |
+| `0x11C1080` | `TOP_HADDR` | `0x00000000` |
+| `0x11C1088` | `OVL_SIZE` | `0x01DF027F` |
+
+`TOP_LADDR` is the single most informative word in the whole stack right now. If
+it is zero or implausible, the DE is being pointed at nothing and the fault is
+above the hardware. If it holds a sane DRAM address, then the DE has been told
+where the pixels are and still does not fetch them, which points at the fetch
+path or an enable rather than at configuration.
+
+A note on `ATTR` bit 0: mainline rewrites the layer enable on every commit, with
+the comment "it can clear spontaneously for unknown reasons". Reading it back as
+**0** on a supposedly enabled plane would be worth more than any other single
+result here.
+
+Then, in order:
+
+1. **`0x1281080`, `0x1281088`, `0x128108C`** — `BLEND_ROUTE`, `BLEND_BKCOLOR`
+   and `BLEND_OUTSIZE`, the three blender registers that were never actually
+   compared. Cheap, and one of them decides whether "the blender matches the
+   vendor" is a claim or an assumption.
+2. **`0x1008010`** — the DE→TCON mux. Mainline never writes it; neither side has
+   ever read it.
+3. **`0x1008008`** — the MBUS clock, to confirm the accident described above.
 4. **`0x1008104` bit 0** on this image after any change — the progress oracle.
 
 > The standing warning still applies: reading DE33 addresses speculatively
@@ -214,3 +319,10 @@ construction as well as by measurement), replaces a guessed register base with a
 derived one, and turns "the screen is green" into a one-read boolean. The
 ROCKNIX planes refactor remains the fallback, and the note against it stands:
 its stated motivation was measured not to apply here.
+
+It also narrows where a bug can still be hiding. Mainline's register *map* is
+now confirmed against the vendor's own structs for the blender, the channel
+bases and the UI layer — so a wrong offset is no longer a live theory anywhere
+except the top block, and there the DE2 tables land on the right bits by
+coincidence. What remains is a wrong *value*, a missing write, or an ordering
+problem, and the measurement list above is arranged to tell those apart.
