@@ -8,9 +8,9 @@ Allwinner H700 device.
 > Not published to Hex yet, so there is no version badge and no `"~> 0.1"`
 > dependency to add. Use a path or git dependency as shown below.
 
-This has been **confirmed working on a physical RG40XXV**: it boots, joins
-WiFi on 5 GHz, and is reachable over SSH. Getting there took four fixes that
-are worth knowing about before you change anything here — see
+This has been **confirmed working on a physical RG40XXV**: it boots, joins WiFi
+on 5 GHz, and answers SSH over both WiFi and the USB-C cable. Getting there took
+five fixes that are worth knowing about before you change anything here — see
 "[What bring-up actually found](#what-bring-up-actually-found)".
 
 | Feature              | Description                                     |
@@ -19,7 +19,7 @@ are worth knowing about before you change anything here — see
 | Memory               | 1 GB LPDDR3 @ 672 MHz — **not** LPDDR4, see below |
 | Storage              | MicroSD                                         |
 | Linux kernel         | 6.18.x mainline                                 |
-| IEx terminal         | `ttyS0` (UART0, internal pads), or SSH over WiFi |
+| IEx terminal         | SSH over WiFi or USB gadget; `ttyS0` on internal pads |
 | GPIO, I2C, SPI       | Yes, via [circuits](https://github.com/elixir-circuits) |
 | WiFi                 | RTL8821CS, mainline `rtw88_8821cs`              |
 | Bluetooth            | RTL8821CS, `btrtl` + H5/3-wire                  |
@@ -112,9 +112,10 @@ fwup _build/rg40xxv_dev/nerves/images/my_app.fw -d /dev/rdiskN
 The RG40XXV has no pin header, so plan how you will talk to it before you
 flash.
 
-### WiFi (recommended)
+### WiFi
 
-This is the route that has actually been made to work. `wpa_supplicant`,
+Both this and the USB gadget below are confirmed working. WiFi is the one you
+want in normal use; USB is easier for a first boot. `wpa_supplicant`,
 `wireless-regdb` and the `rtw88` firmware are all in the image; configure it
 from your application with `vintage_net_wifi`.
 
@@ -129,27 +130,42 @@ Two things to get right, both of which cost time to discover — see step 1 of
   (see "Known limitations"), so without this the daemon never starts and the
   device is unreachable even with working WiFi.
 
-### USB gadget (does not currently work)
+### USB gadget over the type-C cable
 
-> [!WARNING]
-> Do not plan on reaching the device this way. It has been attempted and the
-> host never enumerates the gadget. Details in "Known limitations"; the short
-> version is that the phy ends up in `USB_DR_MODE_HOST` because the AXP717's
-> type-C role switch has no device tree binding.
+**Confirmed working**, and for bringing up a new unit this is the better of the
+two routes: it needs no WiFi credentials and no SSH host key baked in, and it
+cannot be broken by getting the regulatory domain wrong.
 
 Mainline sets the H700's `usbotg` node to `dr_mode = "peripheral"`, and the
-kernel here is built with `USB_CONFIGFS`, `..._ECM`, `..._RNDIS` and
-`..._ACM`, so the pieces are present. Nothing composes a gadget at boot —
-that is the application's job, as on other Nerves gadget targets. Composing
-one via configfs does succeed: `usb0` appears and `vintage_net_direct`
-assigns it an address. It just never connects to the host.
+kernel here is built with `USB_CONFIGFS`, `..._ECM`, `..._RNDIS` and `..._ACM`.
+Nothing composes a gadget at boot — that is the application's job, as on other
+Nerves gadget targets. With `{"usb0", %{type: VintageNetDirect}}` in your
+config and a gadget composed via configfs, the device appears on the host as
+`Nerves handheldgame` (`1d6b:0104`), serves DHCP, and answers SSH:
+
+```console
+$ ifconfig | grep 172.31
+	inet 172.31.70.42 netmask 0xfffffffc broadcast 172.31.70.43
+$ ssh nerves@172.31.70.41
+```
+
+Composing the gadget is a matter of writing to
+`/sys/kernel/config/usb_gadget/`; note that configfs is not mounted by the
+Nerves skeleton's fstab, so mount it first. CDC-ECM is the function to pick for
+macOS and Linux hosts.
+
+> [!NOTE]
+> This needs `patches/linux/0002-phy-sun4i-usb-let-the-mux-route-decide-phy0-mode.patch`,
+> which is in this system. Without it the gadget composes and `usb0` gets an
+> address, but the host never enumerates it: `sun50i_h616_cfg` sets
+> `.phy0_dual_route = true`, so the EHCI/OHCI host driver and MUSB share phy0
+> and both call `phy_set_mode()` on it — the host wins, and the port sits
+> electrically in host mode while the logs show
+> `phy-5100400.phy.0: Changing dr_mode to 1`.
 
 > [!IMPORTANT]
-> `mix nerves.new` generates a `config/target.exs` containing
-> `{"usb0", %{type: VintageNetDirect}}`. **That interface will not come up on
-> this system** unless your application composes a gadget, and even then it
-> will not carry traffic. The generated config also lists `eth0`, which this
-> device does not have at all.
+> `mix nerves.new` also generates an `eth0` entry, which this device does not
+> have at all. Remove it or expect a permanently disconnected interface.
 
 ### UART0
 
@@ -375,7 +391,7 @@ never started; both changed means the failure is in userland.
 
 ## What bring-up actually found
 
-Four things, none of which were visible from source review.
+Five things, none of which were visible from source review.
 
 **1. The board is LPDDR3, not LPDDR4.** This is the important one.
 `configs/anbernic_rg35xx_h700_defconfig` upstream specifies
@@ -417,6 +433,19 @@ choice", and loops — present and configured but never reachable.
 **4. The LED is a charge indicator**, not a boot signal. See the warning in
 step 2.
 
+**5. The OTG phy is shared, and the host driver was winning it.**
+`sun50i_h616_cfg` sets `.phy0_dual_route = true`, so the EHCI/OHCI host
+controllers and MUSB share phy0 and both call `phy_set_mode()` on it. The host
+won, leaving the type-C port electrically in host mode — logged as
+`phy-5100400.phy.0: Changing dr_mode to 1` — while the gadget composed happily
+and was assigned an address that could never carry traffic. Fixed by
+`patches/linux/0002-phy-sun4i-usb-let-the-mux-route-decide-phy0-mode.patch`.
+
+The wrong theory here is worth recording: the board DTS notes that the AXP717's
+type-C role switch has no device tree binding, and that was taken as the likely
+cause. It was a plausible reading of a real comment, and it was wrong. The
+missing binding was not the problem; two drivers contending for one phy was.
+
 ## Known limitations
 
 - **No display.** By design — see the top of this file.
@@ -425,11 +454,10 @@ step 2.
   does nothing. Press reset and pull the card. Fixable by enabling the PMIC
   power key, or by mapping a gamepad combo (`/dev/input/event0` *is*
   registered) to `Nerves.Runtime.poweroff/0`.
-- **USB gadget networking does not connect.** The gadget binds and `usb0` gets
-  an address, but the phy logs `Changing dr_mode to 1` (`USB_DR_MODE_HOST`) so
-  the host never enumerates it. The board DTS notes that the AXP717's type-C
-  role switch is not described by any binding. WiFi works, so this has not
-  been chased.
+- **Two kernel patches are carried**, both in `patches/linux/`: a
+  `pwrseq_simple` GPIO-reset fallback without which there is no WiFi, and a
+  sun4i USB phy fix without which the USB gadget never enumerates. Neither is
+  upstream as of 6.18, so both need checking on a kernel bump.
 - **`nerves_ssh` cannot generate host keys on OTP 29** (ssh 6.0.3): the daemon
   dies with `{:error, "No host key available"}` and then crashes in
   `:ssh_system_sup.stop_system(nil)`. Ship host keys in your application's

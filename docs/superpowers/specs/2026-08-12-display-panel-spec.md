@@ -174,15 +174,24 @@ and friends pull in an out-of-tree joypad driver, and `0127-enable-mmc1-*` is
 ROCKNIX's approach to the WiFi problem we already solved differently, with
 `patches/linux/0001-mmc-pwrseq_simple-gpio-reset-fallback.patch`.
 
-## Unrelated find worth keeping
+## Unrelated find, now applied
 
-`0151-phy-fix-OTG-host-mode.patch` looks like the fix for the USB gadget
-limitation in the README. Its rationale:
+`0151-phy-fix-OTG-host-mode.patch` turned out to be the fix for the USB gadget
+limitation, and is **confirmed working on hardware**. It is carried here as
+`patches/linux/0002-phy-sun4i-usb-let-the-mux-route-decide-phy0-mode.patch`.
+
+Its rationale, in its own words:
 
 > For SoCs with dual route the PHY mode is fully determined by the selected mux
 > route (i.e. USB controller to use). As both host (EHCI/OHCI) and peripheral
 > (MUSB) controllers use the same PHY, both drivers can try to set PHY mode.
 
-That matches the observed symptom exactly — `phy-5100400.phy.0: Changing
-dr_mode to 1` (`USB_DR_MODE_HOST`) during boot, after which the gadget binds but
-the host never enumerates it. Worth trying independently of display work.
+`sun50i_h616_cfg` sets `.phy0_dual_route = true`, the host driver was winning,
+and the port sat electrically in host mode — which is why the gadget composed
+and got an address while the host never enumerated it. With the patch the Mac
+sees `Nerves handheldgame` (`1d6b:0104`) and SSH answers at `172.31.70.41`.
+
+Worth noting what this retired: the AXP717 type-C role-switch theory, taken from
+the board DTS comment that the role switch has no binding. That was a reasonable
+reading and it was wrong — the missing binding was not the problem, two drivers
+fighting over one phy was.
