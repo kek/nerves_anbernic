@@ -1,0 +1,43 @@
+From: nerves_anbernic <none@example.com>
+Subject: [PATCH] mmc: pwrseq_simple: fall back to GPIO reset when no reset controller
+
+Since the reset-controller lookup was added to mmc_pwrseq_simple_probe(), a
+node describing exactly one reset-gpios entry and no resets property fails to
+probe:
+
+    pwrseq_simple pwrseq: error -ENOENT: reset control not ready
+    pwrseq_simple pwrseq: probe with driver pwrseq_simple failed with error -2
+
+On the Anbernic RG40XXV that node powers the RTL8821CS SDIO WiFi. The failed
+probe means mmc1 never initialises, so no SDIO device is discovered, no rtw88
+module is autoloaded, and wlan0 never appears.
+
+The driver already has a GPIO reset fallback immediately below, documented as
+being for platforms without RESET support -- but the early return prevents it
+from ever being reached. Treat a missing reset controller as "use the GPIO
+path" and keep propagating -EPROBE_DEFER.
+
+--- a/drivers/mmc/core/pwrseq_simple.c
++++ b/drivers/mmc/core/pwrseq_simple.c
+@@ -137,9 +137,18 @@
+ 	ngpio = of_count_phandle_with_args(dev->of_node, "reset-gpios", "#gpio-cells");
+ 	if (ngpio == 1) {
+ 		pwrseq->reset_ctrl = devm_reset_control_get_optional_shared(dev, NULL);
+-		if (IS_ERR(pwrseq->reset_ctrl))
+-			return dev_err_probe(dev, PTR_ERR(pwrseq->reset_ctrl),
+-					     "reset control not ready\n");
++		if (IS_ERR(pwrseq->reset_ctrl)) {
++			if (PTR_ERR(pwrseq->reset_ctrl) == -EPROBE_DEFER)
++				return -EPROBE_DEFER;
++
++			/*
++			 * No reset controller for this node. That is not fatal:
++			 * fall through to the GPIO based reset handled below,
++			 * which is what boards describing reset-gpios without a
++			 * resets property rely on.
++			 */
++			pwrseq->reset_ctrl = NULL;
++		}
+ 	}
+ 
+ 	/*
