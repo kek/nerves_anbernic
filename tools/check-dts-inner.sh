@@ -99,7 +99,12 @@ assert_match "DE33 clocks present" 'allwinner,sun50i-h616-de33-clk'
 assert_match "mixer0 present" 'allwinner,sun50i-h616-de33-mixer-0'
 assert_match "TCON TOP present" 'allwinner,sun50i-h616-tcon-top'
 assert_match "TCON LCD0 present" 'allwinner,sun50i-h616-tcon-lcd'
-assert_match "panel present" 'anbernic,rg40xx-panel'
+# Variant-agnostic on purpose. Either blob is a legitimate choice and switching
+# between them is a one-line DTS change, so pinning the spelling here just means
+# a red CI run every time someone tries the other panel. That the *selected*
+# variant has a matching blob is asserted by tools/check-consistency.sh, which
+# is the property that actually matters.
+assert_match "panel present" 'anbernic,rg40xx(-v2)?-panel'
 assert_match "panel falls back to the generic driver" 'panel-mipi-dpi-spi'
 assert_match "panel command channel is bit-banged SPI" 'spi-gpio'
 assert_match "backlight present" 'gpio-backlight'
