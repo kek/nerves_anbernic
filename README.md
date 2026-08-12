@@ -30,11 +30,35 @@ five fixes that are worth knowing about before you change anything here — see
 
 ## The display, and what is actually known about it
 
-The 4" LCD pipeline **works and is confirmed on hardware**. The panel does
-**not yet show an image**: it displays a uniform colour that does not change
-when the framebuffer is written. Everything below distinguishes what is
-measured from what is not, because on this board "no picture" covers at least
-four unrelated failures and the screen is the thing under test.
+The 4" LCD **works, confirmed on hardware**: the panel shows the framebuffer
+console. Everything below distinguishes what is measured from what is not,
+because on this board "no picture" covers at least four unrelated failures and
+the screen is the thing under test.
+
+It spent a long time showing a uniform colour that ignored the framebuffer,
+with every register anyone thought to compare reading correctly. The cause was
+one missing device tree property, and it is worth stating up front because the
+failure had no error attached to it anywhere:
+
+**The endpoint in TCON TOP's output port must carry `reg = <0>`, and that value
+is a TCON index rather than a port number.** `sun4i_tcon_of_get_id_from_port()`
+reads it with `of_property_read_u32()` and has no default, so omitting it
+returns `-EINVAL` — and nothing checks the sign. `sun8i_tcon_top_de_config()`
+only rejects `tcon > 3`, so `-22` reached
+`FIELD_PREP(TCON_TOP_PORT_DE0_MSK, ...)`, whose two-bit mask turned it into 2.
+`TCON_TOP_PORT_SEL` then routed mixer0 to TCON2 while the panel hangs off
+TCON0. The panel got a constant colour, the display engine never completed a
+frame, and nothing logged a word about it.
+
+Two details made it hard to see. The mixer derives its own id from the same
+graph but through `of_graph_parse_endpoint()`, which *does* default a missing
+`reg` to 0 — so one half of the pipeline tolerated the omission and the other
+half did not. And `patches/linux/0103` writes the correct `0x20` into
+`PORT_SEL` at bind, which looked like it had the routing covered; the TCON
+driver overwrites the DE0 field afterwards.
+
+`tools/check-dts.sh` now asserts the property, because it produces no error and
+no log line when it is wrong.
 
 ### What is measured, on hardware
 
@@ -52,48 +76,49 @@ four unrelated failures and the screen is the thing under test.
   640×480 buffer, pitch 2560. No errors anywhere in dmesg — no SPI warnings,
   no DRM warnings.
 
-### What is wrong, and what that rules out
+- The framebuffer console is visible on the panel.
+- `TCON_TOP_PORT_SEL` (`0x651001c`) reads `0x20`, matching a muOS that drives
+  this panel correctly. It read `0x22` while the screen was blank.
+- The mixer's global status (`0x1008104`) reads `0x111`, again matching muOS.
+  **Bit 0 is the frame-end latch**, and it re-arms after each write-1-to-clear,
+  so the display engine is completing frames. It read `0x100` — bit 0 never
+  set — for as long as the routing was wrong.
 
-Writing a full screen of solid red into `/dev/fb0` — the very buffer DRM says
-it is scanning out — does not change what the panel shows. So:
+### How it was found, and what that ruled out along the way
 
-- **The SPI command channel works.** The v1 blob gave a blank screen and the v2
-  blob gives a uniform colour; the panel's behaviour changed when the init
-  sequence changed. That also means the SPI pin *roles* are right, which was
-  the least-evidenced part of the wiring.
-- **The panel is not the problem, and neither is DRM.** Every software-visible
-  layer is correct. Pixels are being clocked at the right rate with the right
-  timings, and the panel is receiving a constant value rather than frame data.
-- **So the fault is in the DE→TCON data path, below what DRM can see.**
+Worth keeping, because the wrong answers were expensive and each looked
+convincing.
 
-The DE33 top-block registers are now decoded from Allwinner's own sun50iw9 BSP
-in [the DE33 register
-decode](docs/superpowers/specs/2026-08-13-de33-register-decode.md). The fact
-that matters: `0x1008104` is the mixer's global **status** register and its
-bit 0 is the **frame-end latch**. A working muOS has it set and this tree does
-not, so the display engine here has never completed a frame. That is a
-one-register-read pass/fail signal, and a better thing to chase than the colour
-of the screen.
+Writing solid red into `/dev/fb0` did not change what the panel showed, which
+established three things: the SPI command channel works (the v1 blob gave a
+blank screen and v2 a uniform colour, so panel behaviour tracked the init
+sequence, and the pin *roles* are right); the panel and DRM are both innocent,
+since every software-visible layer was correct; and therefore the fault sat in
+the DE→TCON path, below what DRM can see.
 
-The prime suspect is upstream's DE33 mixer support itself. Mainline has the
-DE33 mixer and clock drivers but **no H616 display device tree at all** — not
-even in master — so that code path has never been exercised by an upstream
-board. ROCKNIX carries a *newer* refactor of the same author's work that moves
-plane handling out of the mixer into a separate `sun50i_planes` driver, and
-ROCKNIX's stack is the one with field evidence behind it. This tree chose
-upstream's mixer on the principle of not reverting working upstream code (see
-`patches/linux/0100`'s header); the evidence above suggests that principle
-picked the wrong side here, because the upstream code may be incomplete without
-the plane split rather than merely older.
+That is where it stayed for a while, because **upstream's DE33 mixer was the
+obvious suspect and it was the wrong one**. Mainline has the DE33 mixer and
+clock drivers but no H616 display device tree at all, so that path has never
+been exercised by an upstream board; ROCKNIX carries a newer refactor splitting
+plane handling into a separate `sun50i_planes` driver, and ROCKNIX has the field
+evidence. Adopting it was the recommended next step for some time. Two
+measurements killed that theory: the plane-mapping constants upstream admits it
+does not understand turned out to match muOS exactly, and then every register in
+the mixer — layer enable, format, pitch, `TOP_LADDR` pointing at a real
+framebuffer, blender route, sizes — read correctly while the engine still did
+nothing.
 
-**Next step, therefore: adopt ROCKNIX's planes driver** — the `sun50i_planes`
-driver plus its `sun8i_mixer`, `sun8i_vi_layer` and `ccu-sun8i-de2` changes,
-and its device tree layout with a separate `planes@100000` node and the mixer
-carrying only its `display` and `top` windows. That is roughly seven hunks that
-0100 deliberately dropped. The register windows themselves are already known
-good: `top` is `0x8100`/`0x40` and `display` is `0x280000`/`0x20000`, which
-match `sun8i_top_regmap_config` (`max_register 0x3c`) and
-`sun8i_disp_regmap_config` (`0x20000`) exactly.
+Decoding Allwinner's own sun50iw9 BSP is what converted "the screen is green"
+into a one-register boolean; see [the DE33 register
+decode](docs/superpowers/specs/2026-08-13-de33-register-decode.md). Once
+`0x1008104` was known to be the frame-end latch, the question became "why does
+this engine never finish a frame" — and an engine wired to a TCON that is not
+driving the panel never will.
+
+The general lesson is the one this board keeps teaching: **a firmware known to
+drive the hardware is ground truth in a way source review is not.** Comparing
+one register against muOS answered in minutes what weeks of reading upstream
+source had not.
 
 The pipeline is:
 
@@ -101,14 +126,21 @@ The pipeline is:
 mixer0 -> tcon_top -> tcon_lcd0 -> panel   (RGB888 pixels + SPI init sequence)
 ```
 
-Verified without hardware: the patch series applies cleanly to 6.18.44 in the
-real Buildroot flow; the kernel builds; the DTB compiles with no new `dtc`
-warnings and passes fourteen pipeline assertions in `tools/check-dts.sh`;
-`panel-mipi.ko`, `sun4i-drm.ko`, `sun4i-tcon.ko`, `sun8i-mixer.ko`,
-`sun8i_tcon_top.ko` and `gpio_backlight.ko` are all built; and both panel
-blobs are installed in the target rootfs.
+Verified in the build: the patch series applies cleanly to 6.18.44 in the real
+Buildroot flow; the kernel builds; the DTB compiles and passes every pipeline
+assertion in `tools/check-dts.sh`; `panel-mipi.ko`, `sun4i-drm.ko`,
+`sun4i-tcon.ko`, `sun8i-mixer.ko`, `sun8i_tcon_top.ko` and `gpio_backlight.ko`
+are all built; and both panel blobs are installed in the target rootfs.
 
-Not verified: that any of it produces light.
+Two `dtc` warnings are expected, and `tools/check-dts-inner.sh` says which:
+`unit_address_vs_reg` on `/soc` comes from mainline's dtsi, and
+`graph_child_address` on tcon-top's `port@1` is ours and deliberate — see the
+note in the DTS.
+
+Still unverified: which panel variant this unit actually has. The v2 blob is
+selected and produces a correct image, which is good evidence, but the v1 blob
+was never retried after the routing was fixed — and a wrong variant was
+previously expected to show as scrambled rather than absent.
 
 ### This is a smaller job than it used to be
 
@@ -149,14 +181,17 @@ checks it at build time.
 `anbernic,rg40xx-v2-panel`, and the DTS says so.
 
 v1 was tried first, on the strength of muOS naming this hardware's panel
-`fog_fj035fhd05_v1`. It produced a blank screen. v2 produces a uniform colour
-instead — a different result, which is how we know the init sequence reaches
-the panel at all. Since ROCKNIX's `rg40xx-v` default *is* the v1 panel and it
-also shows nothing on this unit while muOS works, the vendor's `_v1` and
-ROCKNIX's `-v2-panel` evidently do not refer to the same revision split.
+`fog_fj035fhd05_v1`. It produced a blank screen; v2 produced a uniform colour
+instead — a different result, which is how we knew the init sequence reached the
+panel at all.
 
-Neither variant produces an image yet, so this is not settled — but it is no
-longer a coin flip, and it is one string to change back.
+**Both of those tests happened while the mixer was routed to the wrong TCON**,
+so neither says much about the variant: no frame data was reaching the panel
+either way. v2 now produces a correct image, which is real evidence for v2, but
+v1 has not been retried since the routing was fixed and deserves one run before
+this is called settled.
+
+Either way it is one string to change back.
 
 Two traps when reading the log here:
 
@@ -619,11 +654,9 @@ missing binding was not the problem; two drivers contending for one phy was.
 
 ## Known limitations
 
-- **The display pipeline works but the panel shows no image.** DRM comes up,
-  the backlight lights, and the TCON clocks pixels at 27 MHz, but the panel
-  displays a uniform colour that does not follow the framebuffer. The suspect
-  is upstream's DE33 mixer, which no upstream board exercises. See the top of
-  this file for the measurements and the proposed next step.
+- **The panel variant is not confirmed.** `anbernic,rg40xx-v2-panel` is
+  selected and gives a correct image, but v1 was last tried while the DE→TCON
+  routing was broken, so it was never given a fair test. Both blobs ship.
 - **No HDMI.** The SoC nodes are upstream but nothing here describes the
   connector.
 - **No software power-off.** `CONFIG_INPUT_AXP20X_PEK` is not set and no
@@ -765,7 +798,7 @@ failures that look identical on the device:
 | No `/sys/class/drm/card0` | Almost always the panel driver, not the display engine. `panel_mipi` cannot autoload and cannot be built in, so check that `erlinit.config` still has its `--pre-run-exec` modprobe. sun4i's component master cannot complete without the panel, so `/sys/class/backlight` appearing while `card0` does not is exactly this |
 | `card0` exists, no connector | The panel node is not binding — check `dmesg` for `panel-mipi` and for a `request_firmware` failure on `panels/anbernic,rg40xx-v2-panel.panel` |
 | Correct mode, screen black | Backlight, or the init sequence never ran. Check `/sys/class/backlight/backlight` exists and that the blob loaded |
-| Correct mode, uniform colour that ignores the framebuffer | **Where this tree is now.** Write a screen of solid red into `/dev/fb0` and see whether it changes; if not, the DE→TCON path is not carrying frame data and the panel is not at fault. See the DE33 discussion at the top |
+| Correct mode, uniform colour that ignores the framebuffer | The DE→TCON path is not carrying frame data, and the panel is not at fault. Read `TCON_TOP_PORT_SEL` at `0x651001c`: its low two bits are the TCON the mixer feeds, and they must be `0`. Then read the frame-end latch, bit 0 of `0x1008104` — if it never sets, the engine is not completing frames. This exact failure is what the missing endpoint `reg` caused; see the top of this file |
 | Correct mode, scrambled or rolling | **Wrong panel variant.** One string in the DTS; see above. Not wrong timings |
 | Correct mode, correct image | Done. Update the hardware table and delete the hedging at the top of this file |
 

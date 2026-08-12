@@ -296,12 +296,30 @@
 			#size-cells = <0>;
 
 			/*
-			 * Single-endpoint ports, so no #address-cells and no
-			 * endpoint reg: of_graph_parse_endpoint() defaults the
-			 * id to 0, which is what an explicit reg = <0> would
-			 * have said. Putting a second endpoint on either port
-			 * -- routing mixer1 in, or tcon_tv0 out -- means adding
-			 * the cells and the regs back.
+			 * The input endpoint can stay unnumbered, because the
+			 * only thing that reads it is sun8i_mixer_of_get_id(),
+			 * which goes through of_graph_parse_endpoint() and so
+			 * defaults a missing reg to 0.
+			 *
+			 * The OUTPUT endpoint must carry an explicit reg, and
+			 * it is the TCON index rather than a port number. The
+			 * two are read by different code:
+			 * sun4i_tcon_of_get_id_from_port() calls
+			 * of_property_read_u32(remote, "reg") directly, with no
+			 * default. Omitting it made that return -EINVAL, and
+			 * nothing checks the sign -- sun8i_tcon_top_de_config()
+			 * only rejects tcon > 3, so -22 reached
+			 * FIELD_PREP(TCON_TOP_PORT_DE0_MSK, ...) and its two-bit
+			 * mask turned it into 2. TCON_TOP_PORT_SEL then routed
+			 * mixer0 to TCON2 while the panel hangs off TCON0, and
+			 * the panel showed a constant colour while the display
+			 * engine never completed a frame. Confirmed on hardware:
+			 * PORT_SEL read 0x22 against a working muOS's 0x20, and
+			 * correcting it live made the screen show the console.
+			 *
+			 * So reg = <0> here means TCON0 = tcon_lcd0. This is
+			 * what ROCKNIX encodes with its endpoint@0/endpoint@2
+			 * numbering.
 			 */
 			tcon_top_mixer0_in: port@0 {
 				reg = <0>;
@@ -311,10 +329,23 @@
 				};
 			};
 
+			/*
+			 * dtc warns that #address-cells/#size-cells are
+			 * unnecessary for a single child (graph_child_address).
+			 * They are necessary here: the reg is load-bearing, and
+			 * without the cells dtc inherits <2>/<1> from /soc,
+			 * calls a 4-byte reg malformed and cascades six further
+			 * warnings. One informational warning is the better
+			 * trade. It goes away by itself if tcon_tv0 is ever
+			 * wired up, since the port then has two endpoints.
+			 */
 			tcon_top_mixer0_out: port@1 {
 				reg = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
 
-				tcon_top_mixer0_out_tcon_lcd0: endpoint {
+				tcon_top_mixer0_out_tcon_lcd0: endpoint@0 {
+					reg = <0>;
 					remote-endpoint = <&tcon_lcd0_in_tcon_top_mixer0>;
 				};
 			};
@@ -337,7 +368,12 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			/* Single-endpoint ports; see the note in tcon_top above. */
+			/*
+			 * These two can stay unnumbered: nothing reads their
+			 * reg. It is the endpoint on the far side, in
+			 * tcon_top's output port, that encodes the TCON index
+			 * -- see the note there before removing any reg.
+			 */
 			tcon_lcd0_in: port@0 {
 				reg = <0>;
 

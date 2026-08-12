@@ -35,8 +35,11 @@ cpp -nostdinc -I scripts/dtc/include-prefixes -undef -D__DTS__ \
     "arch/arm64/boot/dts/${DTS_NAME}.dts"
 
 echo "==> dtc"
-# The unit_address_vs_reg warning on /soc comes from mainline's
-# sun50i-h616.dtsi, not from us.
+# Two warnings are expected. unit_address_vs_reg on /soc comes from mainline's
+# sun50i-h616.dtsi, not from us. graph_child_address on tcon-top's port@1 is
+# ours and is deliberate: see the note in the DTS: the cells look unnecessary
+# to dtc because the port has one child, but dropping them makes dtc inherit
+# <2>/<1> from /soc and emit six warnings instead of one.
 dtc -I dts -O dtb -i arch/arm64/boot/dts -i arch/arm64/boot/dts/allwinner \
     -o /tmp/board.dtb /tmp/board.dts.tmp
 
@@ -99,6 +102,29 @@ assert_match "DE33 clocks present" 'allwinner,sun50i-h616-de33-clk'
 assert_match "mixer0 present" 'allwinner,sun50i-h616-de33-mixer-0'
 assert_match "TCON TOP present" 'allwinner,sun50i-h616-tcon-top'
 assert_match "TCON LCD0 present" 'allwinner,sun50i-h616-tcon-lcd'
+
+# Which TCON the display engine is routed to comes from the reg of the
+# endpoint in TCON TOP's *output* port, and it is a TCON index rather than a
+# port number. sun4i_tcon_of_get_id_from_port() reads it with
+# of_property_read_u32() and has no default, so omitting it returns -EINVAL --
+# and nothing checks the sign. sun8i_tcon_top_de_config() only rejects
+# tcon > 3, so -22 reaches FIELD_PREP(TCON_TOP_PORT_DE0_MSK, ...) whose
+# two-bit mask yields 2. TCON_TOP_PORT_SEL then routes mixer0 to TCON2 while
+# the panel hangs off TCON0: the panel shows a constant colour, the display
+# engine never completes a frame, and every register anyone thinks to compare
+# looks correct. That is exactly how this was found -- PORT_SEL read 0x22
+# against a working muOS's 0x20.
+tcon_ep_reg=$(fdtget /tmp/board.dtb \
+    /soc/tcon-top@6510000/ports/port@1/endpoint@0 reg 2>/dev/null || echo MISSING)
+if [ "$tcon_ep_reg" = "0" ]; then
+    echo "  ok       TCON TOP output endpoint is reg = <0>, routing mixer0 to TCON0"
+else
+    echo "  FAILED   TCON TOP output endpoint reg is '$tcon_ep_reg', wanted 0."
+    echo "           That value is the TCON index. Wrong or missing, the DE is"
+    echo "           routed to a TCON the panel is not on, and the screen shows"
+    echo "           a constant colour with no error anywhere."
+    rc=1
+fi
 # Variant-agnostic on purpose. Either blob is a legitimate choice and switching
 # between them is a one-line DTS change, so pinning the spelling here just means
 # a red CI run every time someone tries the other panel. That the *selected*
