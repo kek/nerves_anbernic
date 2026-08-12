@@ -36,6 +36,9 @@ BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="${NERVES_DEFCONFIG_DIR}/linux/sun50i-h700-anbe
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_PACKAGE_BUSYBOX_CONFIG="${BR2_EXTERNAL_NERVES_PATH}/board/nerves-common/busybox.config"
+# Adds devmem, which nerves-common's busybox.config turns off. See the header
+# of the fragment for why the display work needs it.
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="${NERVES_DEFCONFIG_DIR}/busybox/busybox.fragment"
 BR2_PACKAGE_F2FS_TOOLS=y
 # Do NOT set BR2_TARGET_ROOTFS_SQUASHFS4_XZ here. U-Boot reads the kernel,
 # the device tree, and extlinux.conf out of the squashfs itself, and its

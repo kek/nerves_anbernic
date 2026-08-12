@@ -265,9 +265,30 @@ at `0x11C1000`. The video channel at `0x1101000` is unused by both sides.
 
 ## What to measure next, in order
 
-One `devmem <addr> 32` each on muOS with the screen lit, against regmap debugfs
-(or busybox `devmem`, still worth adding) on this image. All are single reads in
-windows already known to respond.
+One read each on muOS with the screen lit, against the same read on this image.
+All are single reads in windows already known to respond.
+
+**Both sides now have `/sbin/devmem`.** It was missing here, which is what
+stopped the previous session; `busybox/busybox.fragment` turns it back on, since
+nerves-common's busybox config disables it. muOS has it at the same path, so the
+same command runs on both:
+
+```sh
+devmem 0x11C1010 32
+```
+
+Over SSH this image answers with Elixir rather than a shell, so:
+
+```elixir
+System.cmd("/sbin/devmem", ["0x11C1010", "32"])
+```
+
+Registers owned by a driver can also be read without `devmem`, through regmap's
+debugfs — `/sys/kernel/debug/regmap/1100000.mixer-{layers,top,display}`, after
+`mount -t debugfs none /sys/kernel/debug`. That covers the mixer windows,
+including the whole UI layer block below, but **not** the DE clock window at
+`0x1008000`: no driver exposes a regmap for it, which is exactly why `devmem`
+had to come back.
 
 **The UI layer block is the priority.** It has never been read on either side,
 and it is where "does the display engine even have the pixels" becomes a direct

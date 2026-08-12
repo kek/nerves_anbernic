@@ -6,6 +6,7 @@ path = [
  ".github/**",
  ".gitignore",
  "CHANGELOG.md",
+ "busybox/busybox.fragment",
  "nerves_defconfig",
  "REUSE.toml",
  "mix.exs",
@@ -57,7 +58,7 @@ SPDX-FileCopyrightText = "Various"
 SPDX-License-Identifier = "GPL-2.0-only"
 
 # Kernel patches. Each carries its own author in its git-format-patch header;
-# the display series (0100-0103) is taken from ROCKNIX, which is in turn
+# the display series (0100-0104) is taken from ROCKNIX, which is in turn
 # carrying work by Jernej Skrabec, Philippe Simons, Ryan Walklin, Chris Morgan
 # and kikuchan. Two of them are upstream submissions still in flight.
 [[annotations]]

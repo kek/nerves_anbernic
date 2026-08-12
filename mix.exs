@@ -129,6 +129,7 @@ defmodule NervesSystemRG40XXV.MixProject do
 
   defp package_files do
     [
+      "busybox",
       "fwup_include",
       "linux",
       "rootfs_overlay",

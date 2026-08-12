@@ -1,0 +1,17 @@
+# Busybox config fragment, merged over
+# nerves_system_br/board/nerves-common/busybox.config.
+#
+# CONFIG_DEVMEM is explicitly disabled in the nerves-common config, and its
+# absence is what stopped a display debugging session: the DE33 registers that
+# had to be compared against a working muOS are reachable through regmap's
+# debugfs only where a driver owns them. The DE clock window at 0x1008000 --
+# which holds the DE MBUS clock and the DE->TCON mux -- has no such regmap, and
+# the vendor side of every comparison is read with busybox devmem anyway.
+#
+# See docs/superpowers/specs/2026-08-13-de33-register-decode.md for the
+# addresses this exists to read.
+#
+# It reads and writes physical memory, so it is a debugging tool on a
+# development handheld rather than something to keep in a shipping image.
+# CONFIG_STRICT_DEVMEM in the kernel still applies.
+CONFIG_DEVMEM=y

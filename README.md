@@ -784,7 +784,20 @@ File.read!("/sys/kernel/debug/dri/0/state")
 
 # Does anything reach the panel? Solid red, XRGB8888.
 File.write("/dev/fb0", :binary.copy(<<0, 0, 255, 0>>, 640 * 480))
+
+# Read a display-engine register directly. muOS has devmem at the same path,
+# so the same command compares a working configuration against this one.
+System.cmd("/sbin/devmem", ["0x11C1010", "32"])   # UI layer 0 framebuffer address
 ```
+
+`devmem` is here because `busybox/busybox.fragment` re-enables it —
+nerves-common's busybox config turns it off, and its absence is what stopped a
+debugging session. Registers owned by a driver can also be read through
+`/sys/kernel/debug/regmap/1100000.mixer-{layers,top,display}`, but the DE clock
+window at `0x1008000` has no regmap, so `devmem` is the only way to see it.
+[The DE33 register
+decode](docs/superpowers/specs/2026-08-13-de33-register-decode.md) lists the
+addresses worth reading, with the values to expect.
 
 `modetest` needs stdin held open or it drops the mode as it exits:
 
