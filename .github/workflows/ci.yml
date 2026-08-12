@@ -7,6 +7,13 @@ on:
   push:
   pull_request:
 
+# A from-scratch Buildroot build takes the better part of an hour, so pushes
+# arriving faster than that used to stack up runs that were already superseded
+# -- four were queued at once during bring-up. Only the newest ref matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   OTP_VERSION: "29.0.4"
   ELIXIR_VERSION: "1.20.2-otp-29"
@@ -55,6 +62,19 @@ jobs:
           mix archive.install hex nerves_bootstrap "$NERVES_BOOTSTRAP_VERSION" --force
 
       - name: Lint the Buildroot defconfig
+        # NERVES_ENV_DISABLED makes the :nerves_package compiler a no-op. Without
+        # it, loading this project to run the lint task builds the entire system
+        # from source first -- this job took 1h6m to lint one text file, and
+        # duplicated the work build-system already does. The linter only reads
+        # nerves_defconfig, so it needs no artifact.
+        #
+        # Note: `ensure_value: BR2_GLOBAL_PATCH_DIR` is reported as a failed
+        # check and is expected. The rule wants exactly the nerves patch dir,
+        # while we legitimately list two (nerves' plus ours). The single-argument
+        # form of the task does not set a non-zero exit status, so this stays
+        # advisory -- do not "fix" it by dropping our patch directory.
+        env:
+          NERVES_ENV_DISABLED: 1
         run: |
           mix deps.get
           mix nerves.system.lint nerves_defconfig
