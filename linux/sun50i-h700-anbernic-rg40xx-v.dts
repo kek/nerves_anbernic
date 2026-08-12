@@ -17,16 +17,36 @@
  * rg35xx-plus.dts still finds sun50i-h616.dtsi normally. Building this
  * as a genuine in-tree file would drop the prefix.
  *
- * This is a deliberately headless device tree. The 4" panel needs the
- * out-of-tree panel-mipi-dpi-spi driver plus an H616 PWM driver for the
- * backlight, neither of which is upstream, so no panel/tcon/DE2 nodes
- * are described here. See docs/superpowers/specs for the reasoning.
+ * DISPLAY. Everything from the display engine down to the panel is
+ * described here rather than as a patch against sun50i-h616.dtsi, even
+ * though the H616 nodes are SoC-level and upstream would put them
+ * there. Two reasons: a rejected hunk on a kernel bump is a much worse
+ * failure than a merge conflict in a file we own, and keeping it here
+ * means tools/check-dts.sh sees the whole pipeline as source.
+ *
+ * The pipeline is deliberately single-path:
+ *
+ *     mixer0 -> tcon_top -> tcon_lcd0 -> panel (RGB888 + SPI init)
+ *
+ * No mixer1, no tcon_tv0, no HDMI. Those exist on the SoC and ROCKNIX
+ * describes them, but every node on the list above is on the way to
+ * pixels and none of the omitted ones are. Add them when something
+ * needs them, not before.
+ *
+ * The drivers this needs are in patches/linux/0100..0103. 6.18.44
+ * already has the DE33 mixer and its clocks, so the mixer node follows
+ * upstream's binding -- reg-names "layers", "top", "display" -- and not
+ * ROCKNIX's, which splits the layer registers into a separate planes@
+ * node for a driver we deliberately do not carry. See 0100's header.
  */
 
 #include "allwinner/sun50i-h700-anbernic-rg35xx-plus.dts"
 
+#include <dt-bindings/clock/sun8i-de2.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/leds/common.h>
+#include <dt-bindings/reset/sun8i-de2.h>
 
 / {
 	model = "Anbernic RG40XX V";
@@ -37,6 +57,132 @@
 	 * nothing in a Nerves image matches on the string.
 	 */
 	compatible = "anbernic,rg40xx-v", "allwinner,sun50i-h700";
+
+	/*
+	 * Backlight enable on PD28, as a plain GPIO rather than PWM.
+	 *
+	 * PD28 is the right pin, confirmed from two independent directions:
+	 * muOS's vendor DT for this exact device sets lcd_pwm_ch = 0 and
+	 * muxes pwm0 onto PD28, and 6.18.44's pinctrl-sun50i-h616.c makes
+	 * PD28 the only pin in the SoC carrying a pwm0 function. ROCKNIX
+	 * uses PD28 too. (The PI13 and PH2 pins that the panel spec notes
+	 * as differing between muOS DTBs are pwm3 and pwm2 -- they are not
+	 * the backlight.)
+	 *
+	 * The backlight is really PWM-driven -- muOS at 50 kHz, ROCKNIX at
+	 * 25 kHz -- but the H616 PWM controller has no mainline driver, and
+	 * carrying the out-of-tree one costs about 1900 lines of patch for
+	 * brightness control alone. Holding PD28 high is full brightness
+	 * and needs nothing out of tree. Swap this for pwm-backlight when
+	 * brightness control is worth that patch.
+	 *
+	 * Active high: ROCKNIX drives this GPIO_ACTIVE_HIGH in its
+	 * gpio-backlight form and passes flag 0 -- normal polarity -- in
+	 * its pwm-backlight form. muOS's lcd_pwm_pol = 1 is vendor
+	 * encoding and does not obviously contradict that, but it is not
+	 * proof either. If the panel turns out to light up dark, this is
+	 * one line: make it GPIO_ACTIVE_LOW.
+	 *
+	 * default-on matters: nothing in a Nerves image would otherwise
+	 * turn the backlight on, and an unlit panel is indistinguishable
+	 * from a broken pipeline.
+	 */
+	backlight: backlight {
+		compatible = "gpio-backlight";
+		gpios = <&pio 3 28 GPIO_ACTIVE_HIGH>; /* PD28 */
+		default-on;
+	};
+
+	de: display-engine {
+		compatible = "allwinner,sun50i-h616-display-engine";
+		allwinner,pipelines = <&mixer0>;
+	};
+
+	/* Panel 3V3. Not a PMIC rail -- a load switch on PI15. */
+	reg_lcd: regulator-lcd {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd-lcd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pio 8 15 GPIO_ACTIVE_HIGH>; /* PI15 */
+		enable-active-high;
+	};
+
+	/*
+	 * The panel's command channel: three-wire SPI, bit-banged on GPIO.
+	 * There is no hardware SPI controller wired to the panel, so this
+	 * needs CONFIG_SPI_GPIO.
+	 */
+	spi_lcd: spi {
+		compatible = "spi-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		sck-gpios = <&pio 8 9 GPIO_ACTIVE_HIGH>;  /* PI9 */
+		mosi-gpios = <&pio 8 10 GPIO_ACTIVE_HIGH>; /* PI10 */
+		cs-gpios = <&pio 8 8 GPIO_ACTIVE_HIGH>;   /* PI8 */
+		num-chipselects = <1>;
+
+		/*
+		 * The first compatible string is not decoration: the driver
+		 * builds a firmware filename from it and loads
+		 * /lib/firmware/panels/anbernic,rg40xx-panel.panel, which is
+		 * where this panel's timings AND its init sequence live.
+		 * There is no panel-timing node anywhere by design.
+		 *
+		 * This unit is believed to be the v1 panel -- muOS's vendor
+		 * DT names it fog_fj035fhd05_v1. That is an inference from
+		 * the vendor's _v1 suffix lining up with ROCKNIX's -v2-panel
+		 * naming, not a proof. Both variants report 640x480 @ 60 Hz
+		 * with identical blanking, so a correct mode confirms
+		 * nothing about the variant. They differ in init sequence and
+		 * sync polarity, so the failure signature of guessing wrong
+		 * is a scrambled or blank image at a correct mode -- in which
+		 * case switch this one string to "anbernic,rg40xx-v2-panel"
+		 * and rebuild. Both blobs ship.
+		 *
+		 * What muOS independently confirms is the wiring, not the
+		 * variant: its lcd_gpio_0..4 are PI9, PI10, PI8, PI14, PI15,
+		 * which is exactly the SPI clock, MOSI, chip select, reset and
+		 * panel supply used above.
+		 *
+		 * Where muOS and ROCKNIX genuinely disagree is the timings,
+		 * and muOS's are the ones known to drive this hardware:
+		 *
+		 *   muOS (vendor)   24 MHz, total 768 x 521, hbp 46 hspw 20,
+		 *                   vbp 15 vspw 4      -> 59.98 Hz
+		 *   ROCKNIX (.panel) 27 MHz, total 750 x 600, hfp 64 hsync 4
+		 *                   hbp 42, vfp 100 vsync 4 vbp 16 -> 60.00 Hz
+		 *
+		 * The blob carries the timings, so preferring muOS's would
+		 * mean authoring a .panel file rather than editing the DT.
+		 * That is the fallback if ROCKNIX's blob gives a picture that
+		 * is present but wrong; the init sequence inside the blob
+		 * cannot be got from muOS at all, since it lives in Anbernic's
+		 * prebuilt vendor kernel and not in any MustardOS repository.
+		 */
+		panel: panel@0 {
+			compatible = "anbernic,rg40xx-panel", "panel-mipi-dpi-spi";
+			reg = <0>;
+
+			spi-max-frequency = <3125000>;
+			spi-3wire;
+
+			reset-gpios = <&pio 8 14 GPIO_ACTIVE_LOW>; /* PI14 */
+
+			backlight = <&backlight>;
+			power-supply = <&reg_lcd>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&lcd0_rgb888_pins>;
+
+			port {
+				panel_in_rgb: endpoint {
+					remote-endpoint = <&tcon_lcd0_out_lcd>;
+				};
+			};
+		};
+	};
 };
 
 /*
@@ -50,5 +196,181 @@
 		function = LED_FUNCTION_INDICATOR;
 		color = <LED_COLOR_ID_RGB>;
 		gpios = <&pio 8 7 GPIO_ACTIVE_HIGH>; /* PI7 */
+	};
+};
+
+/*
+ * The SoC-level display blocks. /soc carries no label in
+ * sun50i-h616.dtsi, so this is a path reference, same as /leds above.
+ */
+&{/soc} {
+	/*
+	 * Display Engine 3.3. Bound by drivers/bus/sun50i-de2.c through the
+	 * a64-de2 fallback compatible -- without that match the children
+	 * below are never populated and nothing probes.
+	 */
+	bus@1000000 {
+		compatible = "allwinner,sun50i-h616-de33",
+			     "allwinner,sun50i-a64-de2";
+		reg = <0x1000000 0x400000>;
+		allwinner,sram = <&de3_sram 1>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0 0x1000000 0x400000>;
+
+		display_clocks: clock@8000 {
+			compatible = "allwinner,sun50i-h616-de33-clk";
+			reg = <0x8000 0x100>;
+			clocks = <&ccu CLK_DE>, <&ccu CLK_BUS_DE>;
+			clock-names = "mod", "bus";
+			resets = <&ccu RST_BUS_DE>;
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+		};
+
+		/*
+		 * Three register windows, named as upstream's binding
+		 * requires: "layers" is the per-channel plane registers and
+		 * is also reg index 0, which is what the driver ioremaps as
+		 * the engine's own regs; "top" is global control; "display"
+		 * is blend control. The layer window has to be big enough to
+		 * cover channel 3, which sun8i_channel_base() puts at
+		 * map[3] * 0x20000 + 0x1000 = 0x101000 for this SoC.
+		 */
+		mixer0: mixer@100000 {
+			compatible = "allwinner,sun50i-h616-de33-mixer-0";
+			reg = <0x100000 0x180000>,
+			      <0x8100 0x40>,
+			      <0x280000 0x20000>;
+			reg-names = "layers", "top", "display";
+			clocks = <&display_clocks CLK_BUS_MIXER0>,
+				 <&display_clocks CLK_MIXER0>;
+			clock-names = "bus", "mod";
+			resets = <&display_clocks RST_MIXER0>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				mixer0_out: port@1 {
+					reg = <1>;
+
+					mixer0_out_tcon_top_mixer0: endpoint {
+						remote-endpoint = <&tcon_top_mixer0_in_mixer0>;
+					};
+				};
+			};
+		};
+	};
+
+	tcon_top: tcon-top@6510000 {
+		compatible = "allwinner,sun50i-h616-tcon-top",
+			     "allwinner,sun50i-h6-tcon-top";
+		reg = <0x06510000 0x1000>;
+		clocks = <&ccu CLK_BUS_TCON_TOP>,
+			 <&ccu CLK_TCON_TV0>;
+		clock-names = "bus", "tcon-tv0";
+		clock-output-names = "tcon-top-tv0";
+		resets = <&ccu RST_BUS_TCON_TOP>;
+		#clock-cells = <1>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/*
+			 * Single-endpoint ports, so no #address-cells and no
+			 * endpoint reg: of_graph_parse_endpoint() defaults the
+			 * id to 0, which is what an explicit reg = <0> would
+			 * have said. Putting a second endpoint on either port
+			 * -- routing mixer1 in, or tcon_tv0 out -- means adding
+			 * the cells and the regs back.
+			 */
+			tcon_top_mixer0_in: port@0 {
+				reg = <0>;
+
+				tcon_top_mixer0_in_mixer0: endpoint {
+					remote-endpoint = <&mixer0_out_tcon_top_mixer0>;
+				};
+			};
+
+			tcon_top_mixer0_out: port@1 {
+				reg = <1>;
+
+				tcon_top_mixer0_out_tcon_lcd0: endpoint {
+					remote-endpoint = <&tcon_lcd0_in_tcon_top_mixer0>;
+				};
+			};
+		};
+	};
+
+	tcon_lcd0: lcd-controller@6511000 {
+		compatible = "allwinner,sun50i-h616-tcon-lcd",
+			     "allwinner,sun8i-r40-tcon-lcd";
+		reg = <0x06511000 0x1000>;
+		interrupts = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&ccu CLK_BUS_TCON_LCD0>, <&ccu CLK_TCON_LCD0>;
+		clock-names = "ahb", "tcon-ch0";
+		clock-output-names = "tcon-data-clock";
+		#clock-cells = <0>;
+		resets = <&ccu RST_BUS_TCON_LCD0>, <&ccu RST_BUS_LVDS>;
+		reset-names = "lcd", "lvds";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* Single-endpoint ports; see the note in tcon_top above. */
+			tcon_lcd0_in: port@0 {
+				reg = <0>;
+
+				tcon_lcd0_in_tcon_top_mixer0: endpoint {
+					remote-endpoint = <&tcon_top_mixer0_out_tcon_lcd0>;
+				};
+			};
+
+			tcon_lcd0_out: port@1 {
+				reg = <1>;
+
+				tcon_lcd0_out_lcd: endpoint {
+					remote-endpoint = <&panel_in_rgb>;
+				};
+			};
+		};
+	};
+};
+
+&pio {
+	/*
+	 * Bank D carries the parallel RGB pins. The other banks already get
+	 * their supply in rg35xx-2024.dts; PD was left out because nothing
+	 * used it until now, and without it the pinmux below cannot drive
+	 * anything.
+	 */
+	vcc-pd-supply = <&reg_cldo3>;
+
+	lcd0_rgb888_pins: lcd0-rgb888-pins {
+		pins = "PD0", "PD1", "PD2", "PD3",
+		       "PD4", "PD5", "PD6", "PD7",
+		       "PD8", "PD9", "PD10", "PD11",
+		       "PD12", "PD13", "PD14", "PD15",
+		       "PD16", "PD17", "PD18", "PD19",
+		       "PD20", "PD21", "PD22", "PD23",
+		       "PD24", "PD25", "PD26", "PD27";
+		function = "lcd0";
+	};
+};
+
+/*
+ * The display engine needs a slice of SRAM C. 6.18.44's sunxi_sram has
+ * no H616-specific section descriptor, so the a64 fallback compatible is
+ * what actually matches; the H616 string is there for the day it gains
+ * one.
+ */
+&sram_c {
+	de3_sram: sram-section@0 {
+		compatible = "allwinner,sun50i-h616-sram-c",
+			     "allwinner,sun50i-a64-sram-c";
+		reg = <0x0000 0x1e000>;
 	};
 };

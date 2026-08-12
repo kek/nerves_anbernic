@@ -88,19 +88,41 @@ else
     rc=1
 fi
 
-# Headless by design. This is a trip-wire in both directions: it catches a
-# panel node added here without the driver to back it, and it also fires if
-# mainline itself gains H700 display support -- in which case the headless
-# decision in the README is worth revisiting rather than worked around.
-if grep -qE 'panel' /tmp/board.decompiled.dts; then
-    echo "  FAILED   a panel node is present, but this system is headless."
-    echo "           Either it was added here without a driver, or mainline"
-    echo "           gained H700 display support -- see 'Adding display"
-    echo "           support' in the README before changing this check."
+# Display pipeline. This board is no longer headless; what used to be a
+# trip-wire against any panel node is now a check that the whole chain is
+# present, because a partial pipeline is the failure mode that looks like a
+# hardware problem. Every link below is one that produces "no picture, no
+# error" when it is missing.
+assert_match "display-engine present" 'allwinner,sun50i-h616-display-engine'
+assert_match "DE33 bus present" 'allwinner,sun50i-h616-de33'
+assert_match "DE33 clocks present" 'allwinner,sun50i-h616-de33-clk'
+assert_match "mixer0 present" 'allwinner,sun50i-h616-de33-mixer-0'
+assert_match "TCON TOP present" 'allwinner,sun50i-h616-tcon-top'
+assert_match "TCON LCD0 present" 'allwinner,sun50i-h616-tcon-lcd'
+assert_match "panel present" 'anbernic,rg40xx-panel'
+assert_match "panel falls back to the generic driver" 'panel-mipi-dpi-spi'
+assert_match "panel command channel is bit-banged SPI" 'spi-gpio'
+assert_match "backlight present" 'gpio-backlight'
+
+# 6.18.44 implements DE33 planes inside the mixer and wants three named
+# register windows. ROCKNIX carries a newer refactor that splits the layer
+# registers into a separate planes@ node instead; taking its device tree
+# without its drivers gives a mixer that probes and a screen that never
+# lights. So pin the binding we actually build against.
+assert_match "mixer uses upstream's three-window binding" \
+    'reg-names = "layers", "top", "display"'
+if grep -qE 'de33-planes' /tmp/board.decompiled.dts; then
+    echo "  FAILED   a de33-planes node is present. That belongs to ROCKNIX's"
+    echo "           separate planes driver, which this tree deliberately does"
+    echo "           not carry -- see patches/linux/0100's header."
     rc=1
 else
-    echo "  ok       no panel node (headless by design)"
+    echo "  ok       no de33-planes node (upstream mixer owns the planes)"
 fi
+
+# The parallel RGB pinmux. Without it the TCON drives nothing, and bank D has
+# no supply by default because nothing used it before the display.
+assert_match "RGB888 pinmux present" 'function = "lcd0"'
 
 echo
 if [ "$rc" -eq 0 ]; then

@@ -56,6 +56,29 @@ precedence = "override"
 SPDX-FileCopyrightText = "Various"
 SPDX-License-Identifier = "GPL-2.0-only"
 
+# Kernel patches. Each carries its own author in its git-format-patch header;
+# the display series (0100-0103) is taken from ROCKNIX, which is in turn
+# carrying work by Jernej Skrabec, Philippe Simons, Ryan Walklin, Chris Morgan
+# and kikuchan. Two of them are upstream submissions still in flight.
+[[annotations]]
+path = [
+ "patches/**"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Various kernel contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+# Panel description blobs, from ROCKNIX's kernel-firmware package. These carry
+# the panel timings and the controller init sequence that the generic
+# panel-mipi-dpi-spi driver loads at probe time; there is no source form.
+[[annotations]]
+path = [
+ "rootfs_overlay/lib/firmware/panels/*.panel"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "The ROCKNIX contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
 # U-Boot derived or related files
 [[annotations]]
 path = [

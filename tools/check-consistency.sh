@@ -144,6 +144,52 @@ grep -q "linux/${dts_base}.dts" nerves_defconfig \
     && ok "nerves_defconfig points at ${dts_base}.dts" \
     || fail "nerves_defconfig does not reference linux/${dts_base}.dts"
 
+echo "==> panel firmware"
+
+# The generic panel driver builds a firmware filename out of the first
+# compatible string in the panel node: panels/<compatible>.panel. Nothing
+# checks this at build time, and getting it wrong is close to undebuggable on
+# device -- the panel simply never initialises, with no error, because
+# request_firmware() failing is not fatal to the rest of the pipeline. So
+# assert the two spellings match here, where it costs nothing.
+# Anchor on the generic fallback rather than on "anbernic," alone -- the board
+# node's own compatible starts with "anbernic,rg40xx-v" and would otherwise
+# match first.
+panel_compat=$(awk '/panel-mipi-dpi-spi/ && /compatible/ {
+        match($0, /"anbernic,[^"]+"/)
+        if (RSTART > 0) {
+            print substr($0, RSTART + 1, RLENGTH - 2)
+            exit
+        }
+    }' linux/sun50i-h700-anbernic-rg40xx-v.dts)
+
+if [ -z "$panel_compat" ]; then
+    fail "no anbernic panel compatible found in the board DTS"
+else
+    blob="rootfs_overlay/lib/firmware/panels/${panel_compat}.panel"
+    [ -f "$blob" ] \
+        && ok "panel '$panel_compat' has its blob at $blob" \
+        || fail "panel '$panel_compat' has no blob at $blob"
+fi
+
+# Both variants ship regardless of which one is selected: the wrong one is
+# unusable on the wrong hardware, and a blank screen is a poor way to find
+# that out. Switching variants should be a one-line DTS change and nothing
+# more.
+for v in anbernic,rg40xx-panel anbernic,rg40xx-v2-panel; do
+    [ -f "rootfs_overlay/lib/firmware/panels/${v}.panel" ] \
+        && ok "variant blob present: ${v}.panel" \
+        || fail "variant blob missing: ${v}.panel"
+done
+
+# fbcon is the only console this board has. Losing console=tty0 would silently
+# take the screen back out of the boot path.
+for f in rootfs_overlay/boot/extlinux/extlinux-a.conf rootfs_overlay/boot/extlinux/extlinux-b.conf; do
+    grep -q 'console=tty0' "$f" \
+        && ok "$(basename "$f") puts the kernel log on the panel" \
+        || fail "$(basename "$f") is missing console=tty0"
+done
+
 echo
 if [ "$rc" -eq 0 ]; then echo "Image layout is self-consistent"; else echo "CONSISTENCY CHECK FAILED"; fi
 exit $rc

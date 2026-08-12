@@ -2,9 +2,15 @@
 #
 # Regenerate linux/linux-<series>.defconfig from linux/nerves.fragment.
 #
+#   patch -p1 < patches/linux/*.patch     (in filename order)
 #   make ARCH=arm64 defconfig
 #   scripts/kconfig/merge_config.sh -m .config linux/nerves.fragment
 #   make ARCH=arm64 olddefconfig savedefconfig
+#
+# The patches go on first because some of them add Kconfig symbols of their
+# own, and a symbol that does not exist when olddefconfig runs is dropped
+# without comment. Buildroot builds from the generated defconfig and not from
+# the fragment, so such a symbol would be missing from the actual kernel.
 #
 # Runs in Docker so the result does not depend on what happens to be
 # installed on the host, and so it works on macOS at all. Also verifies that

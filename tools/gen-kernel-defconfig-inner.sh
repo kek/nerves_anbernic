@@ -11,12 +11,32 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
     bc bison flex gcc make libssl-dev libelf-dev curl ca-certificates \
-    xz-utils python3 >/dev/null
+    xz-utils python3 patch >/dev/null
 
 echo "==> Downloading linux-${KVER}"
 cd /build
 curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v${KMAJOR}.x/linux-${KVER}.tar.xz" | tar -xJ
 cd "linux-${KVER}"
+
+# Apply our patches before configuring, because some of them introduce Kconfig
+# symbols -- CONFIG_DRM_PANEL_MIPI comes from patches/linux/0101. Configuring a
+# pristine tree would silently drop those symbols from the generated
+# defconfig, and Buildroot builds from the defconfig rather than from
+# nerves.fragment, so the driver would simply not be built. The fragment's
+# verification step below is what caught that.
+#
+# Same order and same flags as Buildroot's support/scripts/apply-patches.sh:
+# filename order, patch -p1.
+echo "==> applying patches/linux"
+for p in /repo/patches/linux/*.patch; do
+    [ -e "$p" ] || continue
+    echo "  $(basename "$p")"
+    if ! patch -p1 --forward --no-backup-if-mismatch <"$p" >/tmp/patch.log 2>&1; then
+        echo "  FAILED to apply $(basename "$p"):"
+        sed 's/^/    /' /tmp/patch.log
+        exit 1
+    fi
+done
 
 echo "==> make ARCH=arm64 defconfig"
 make ARCH=arm64 defconfig >/dev/null
