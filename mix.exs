@@ -18,13 +18,36 @@ defmodule NervesSystemRG40XXV.MixProject do
       description: description(),
       package: package(),
       deps: deps(),
-      aliases: [loadconfig: [&bootstrap/1]],
+      aliases: aliases(),
       docs: docs()
     ]
   end
 
   def application do
     []
+  end
+
+  # `mix precommit` is the check to run before committing, and tooling that
+  # looks for such an alias will run it instead of guessing.
+  #
+  # It deliberately does *not* compile. Compiling this project builds the whole
+  # system: `:nerves_package` is in `compilers`, so `mix compile` starts an
+  # hour-long Buildroot run in Docker whenever no cached artifact matches the
+  # checksum -- which is the case after any edit to `package_files()`, README
+  # included. A commit-time check that triggers that is unusable, and it fails
+  # for reasons unrelated to the commit.
+  #
+  # These two are what CI's cheap `checks` job runs that needs neither Docker
+  # nor network. `tools/check-dts.sh` is left to CI: it is worth running, but it
+  # downloads a kernel tree and compiles the DTS in a container.
+  defp aliases do
+    [
+      loadconfig: [&bootstrap/1],
+      precommit: [
+        "format --check-formatted",
+        "cmd tools/check-consistency.sh"
+      ]
+    ]
   end
 
   defp bootstrap(args) do
@@ -85,7 +108,8 @@ defmodule NervesSystemRG40XXV.MixProject do
         "CHANGELOG.md",
         "docs/superpowers/specs/2026-08-11-nerves-rg40xxv-design.md",
         "docs/superpowers/specs/2026-08-12-display-support-plan.md",
-        "docs/superpowers/specs/2026-08-12-display-panel-spec.md"
+        "docs/superpowers/specs/2026-08-12-display-panel-spec.md",
+        "docs/superpowers/specs/2026-08-13-de33-register-decode.md"
       ],
       groups_for_extras: [Design: ~r"docs/superpowers/specs/"],
       main: "readme",

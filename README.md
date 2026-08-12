@@ -66,6 +66,15 @@ it is scanning out — does not change what the panel shows. So:
   timings, and the panel is receiving a constant value rather than frame data.
 - **So the fault is in the DE→TCON data path, below what DRM can see.**
 
+The DE33 top-block registers are now decoded from Allwinner's own sun50iw9 BSP
+in [the DE33 register
+decode](docs/superpowers/specs/2026-08-13-de33-register-decode.md). The fact
+that matters: `0x1008104` is the mixer's global **status** register and its
+bit 0 is the **frame-end latch**. A working muOS has it set and this tree does
+not, so the display engine here has never completed a frame. That is a
+one-register-read pass/fail signal, and a better thing to chase than the colour
+of the screen.
+
 The prime suspect is upstream's DE33 mixer support itself. Mainline has the
 DE33 mixer and clock drivers but **no H616 display device tree at all** — not
 even in master — so that code path has never been exercised by an upstream
@@ -110,8 +119,8 @@ DE33 mixer and its clocks** — `allwinner,sun50i-h616-de33-mixer-0` and
 any of this. What is genuinely missing upstream is the TCON support, the panel
 driver, and the device tree.
 
-So this tree carries **four** patches, not seven and not twenty-three, in
-`patches/linux/0100`–`0103`. Each has a header explaining its upstream status.
+So this tree carries **five** patches, not seven and not twenty-three, in
+`patches/linux/0100`–`0104`. Each has a header explaining its upstream status.
 
 ROCKNIX also carries a *newer* refactor that moves plane handling out of the
 mixer into a separate `sun50i_planes` driver. That is deliberately **not**
