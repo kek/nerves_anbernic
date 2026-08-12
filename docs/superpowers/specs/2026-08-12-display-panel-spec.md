@@ -94,6 +94,48 @@ cheap to test, since selecting a variant is one `compatible` string. Try
 mode reads correctly, switch to `anbernic,rg40xx-v2-panel`. That is a faster
 answer than identifying the panel any other way.
 
+## Which variant this unit has
+
+Read off the muOS card, which drives this device's screen correctly. muOS turns
+out to run the **Allwinner vendor BSP**, not mainline — its DTBs report
+`model = "sun50iw9"` and have no `panel@0` node, using Allwinner's `disp2` stack
+instead. So it cannot be compared to ROCKNIX directly, but its vendor LCD
+configuration names the panel outright:
+
+```
+lcd_driver_name = "fog_fj035fhd05_v1";
+```
+
+A **FOG FJ035FHD05, revision v1**. Both DTBs on the card agree; they differ only
+in a PWM pin (`pwm3`/PI13 vs `pwm2`/PH2), so they are two hardware revisions
+sharing one panel.
+
+**Start with `anbernic,rg40xx-panel`, not `-v2-panel`.** That is an inference,
+not a proof: the vendor's `_v1` suffix and ROCKNIX's `-v2-panel` naming are
+assumed to refer to the same revision split. It is well supported and costs
+nothing to check, since step 4 falsifies it immediately — a scrambled image at a
+correct mode means try the other one.
+
+### Vendor timings, for cross-reference
+
+The vendor DT independently confirms the geometry and the SPI wiring, and
+differs on the blanking:
+
+| | vendor BSP (muOS) | ROCKNIX `.panel` |
+|---|---|---|
+| Active | 640 × 480 | 640 × 480 |
+| Pixel clock | 24 MHz | 27 MHz |
+| Total | 770 × 526 | 750 × 600 |
+| Refresh | ≈59.3 Hz | 60.00 Hz |
+| h back porch / sync | 46 / 20 | 42 / 4 |
+| v back porch / sync | 16 / 4 | 16 / 4 |
+| Backlight PWM | channel 0, 50 kHz | channel 0, 40000 ns (25 kHz) |
+| SPI clock / data GPIO | PI9 / PI10 | PI9 / PI10 |
+
+Two sets of timings for the same panel, both landing near 60 Hz — ordinary
+vendor-versus-mainline divergence. Useful because if ROCKNIX's numbers misbehave,
+the vendor's are known to work on this hardware.
+
 ## Device tree for our board
 
 The RG40XXV DTS in ROCKNIX adds almost nothing for display — it only overrides
