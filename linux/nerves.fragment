@@ -134,6 +134,29 @@ CONFIG_BACKLIGHT_GPIO=m
 CONFIG_DRM_FBDEV_EMULATION=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
 
+# Mali GPU. DRM_PANFROST is already enabled by the arm64 defconfig and the
+# module does load -- but it never binds, and the reason is not in the GPU
+# node. That node is status = "okay" and its mali-supply resolves to the
+# PMIC's dcdc2, which is registered and healthy as vdd-gpu-sys. What is
+# missing is the other dependency: power-domains points at
+# /soc/power-controller@7010250, compatible "allwinner,sun50i-h616-prcm-ppu",
+# and nothing in this kernel provides that compatible. So the probe defers
+# until it times out:
+#
+#   panfrost 1800000.gpu: deferred probe timeout, ignoring dependency
+#   panfrost 1800000.gpu: probe with driver panfrost failed with error -110
+#
+# The visible symptom is subtle: there is still a card0, because that is
+# sun4i-drm, and the panel works normally. What is absent is the render node
+# -- no /dev/dri/renderD128 -- and with it every GLES userspace, which is what
+# Mesa, RetroArch and any GPU-backed toolkit need.
+#
+# SUN50I_H6_PRCM_PPU is the driver for that compatible; its Kconfig help says
+# outright that it is "required to enable the Mali GPU in the H616 SoC".
+# Built in rather than a module because panfrost's probe is what waits on it,
+# and deferred probe gives up after 30 s.
+CONFIG_SUN50I_H6_PRCM_PPU=y
+
 # USB gadget. Mainline sets usbotg to dr_mode = "peripheral", so the USB-C
 # port can present a network interface and a serial console -- the primary
 # way onto this device, since it has no pin header. The gadget itself is
