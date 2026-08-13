@@ -211,6 +211,34 @@ else
     fail "before the rootfs is mounted and the panel never probes"
 fi
 
+echo "==> firmware validation"
+
+# Revert protection depends on exactly one variable here, nerves_fw_validated,
+# because U-Boot is built without the bootcount feature and nerves_init reads
+# nothing else. But Nerves.Runtime.firmware_validation_status/0 consults
+# upgrade_available *first* and treats "0" as validated. So writing
+# upgrade_available on a system that does not use bootcount latches automatic
+# validation off after the first validation: the application believes every
+# later upgrade is already valid, nerves_fw_validated stays 0, and U-Boot
+# reverts on the next boot. Confirmed on hardware.
+if grep -qi 'CONFIG_BOOTCOUNT' uboot/uboot.defconfig; then
+    ok "U-Boot has bootcount enabled, so upgrade_available is meaningful"
+elif grep -q 'uboot_setenv(uboot-env, "upgrade_available"' fwup-ops.conf; then
+    fail "fwup-ops.conf sets upgrade_available, but U-Boot has no bootcount"
+    fail "support. That disables automatic validation after the first validate"
+else
+    ok "no upgrade_available written, so validation status follows nerves_fw_validated"
+fi
+
+# And the upgrade tasks clear the stale variables, so a device that was already
+# latched by an older build repairs itself on the next upgrade.
+if [ "$(grep -c 'uboot_unsetenv(uboot-env, "upgrade_available")' fwup.conf)" -eq 2 ]; then
+    ok "both upgrade tasks clear leftover bootcount variables"
+else
+    fail "upgrade.a and upgrade.b must both unset upgrade_available, or a device"
+    fail "latched by an older build never validates automatically again"
+fi
+
 echo
 if [ "$rc" -eq 0 ]; then echo "Image layout is self-consistent"; else echo "CONSISTENCY CHECK FAILED"; fi
 exit $rc
