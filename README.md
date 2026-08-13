@@ -138,10 +138,9 @@ Two `dtc` warnings are expected, and `tools/check-dts-inner.sh` says which:
 `graph_child_address` on tcon-top's `port@1` is ours and deliberate — see the
 note in the DTS.
 
-Still unverified: which panel variant this unit actually has. The v2 blob is
-selected and produces a correct image, which is good evidence, but the v1 blob
-was never retried after the routing was fixed — and a wrong variant was
-previously expected to show as scrambled rather than absent.
+The panel variant is settled too: v2 gives a correct image and v1 gives a blank
+one, tested on this unit after the routing was fixed. See "Which panel this
+unit has".
 
 ### This is a smaller job than it used to be
 
@@ -179,20 +178,30 @@ checks it at build time.
 
 ### Which panel this unit has
 
-`anbernic,rg40xx-v2-panel`, and the DTS says so.
+**`anbernic,rg40xx-v2-panel`. Settled by testing both, on working hardware.**
 
-v1 was tried first, on the strength of muOS naming this hardware's panel
-`fog_fj035fhd05_v1`. It produced a blank screen; v2 produced a uniform colour
-instead — a different result, which is how we knew the init sequence reached the
-panel at all.
+With the display otherwise healthy — connector `connected`, frame-end latch
+running, the correct blob confirmed loaded in dmesg — the panel is the only
+variable left, so swapping the one string is a clean experiment:
 
-**Both of those tests happened while the mixer was routed to the wrong TCON**,
-so neither says much about the variant: no frame data was reaching the panel
-either way. v2 now produces a correct image, which is real evidence for v2, but
-v1 has not been retried since the routing was fixed and deserves one run before
-this is called settled.
+| `compatible` | Result |
+|---|---|
+| `anbernic,rg40xx-v2-panel` | Correct, readable image |
+| `anbernic,rg40xx-panel` (v1) | **Blank, backlight on** |
 
-Either way it is one string to change back.
+So this unit is ROCKNIX's **v2** panel.
+
+That is worth stating loudly because **muOS names this hardware's panel
+`fog_fj035fhd05_v1`**, and the obvious reading — that the vendor's `_v1` is
+ROCKNIX's non-`-v2` variant — is now measured to be **wrong**. The two naming
+schemes do not describe the same split. The vendor suffix is not evidence about
+which ROCKNIX blob to use, and the earlier recommendation in the panel spec to
+"start with `anbernic,rg40xx-panel`" was a reasonable inference that the
+hardware contradicts.
+
+Both earlier attempts at this question were made while the mixer was routed to
+the wrong TCON, so neither could have shown anything; that is why this was
+unresolved for so long rather than because the evidence was subtle.
 
 Two traps when reading the log here:
 
@@ -655,9 +664,6 @@ missing binding was not the problem; two drivers contending for one phy was.
 
 ## Known limitations
 
-- **The panel variant is not confirmed.** `anbernic,rg40xx-v2-panel` is
-  selected and gives a correct image, but v1 was last tried while the DE→TCON
-  routing was broken, so it was never given a fair test. Both blobs ship.
 - **No HDMI.** The SoC nodes are upstream but nothing here describes the
   connector.
 - **No software power-off.** `CONFIG_INPUT_AXP20X_PEK` is not set and no

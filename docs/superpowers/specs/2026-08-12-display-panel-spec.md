@@ -116,6 +116,20 @@ assumed to refer to the same revision split. It is well supported and costs
 nothing to check, since step 4 falsifies it immediately — a scrambled image at a
 correct mode means try the other one.
 
+> **Measured 2026-08-13, and the inference above is WRONG.** This unit needs
+> **`anbernic,rg40xx-v2-panel`**. Tested by swapping only that string, with the
+> display otherwise confirmed healthy: v2 gives a correct image, v1 gives a
+> blank screen with the backlight on.
+>
+> So the vendor's `fog_fj035fhd05_v1` and ROCKNIX's `-v2-panel` do **not**
+> describe the same revision split, and the muOS name is not evidence about
+> which blob to use. Keep the rest of this section — the wiring and the blob
+> format are all confirmed — but treat the naming correspondence as retired.
+>
+> Note also that the predicted symptom was wrong: a wrong variant was expected
+> to look scrambled at a correct mode. It is blank. Anyone diagnosing a blank
+> screen should not rule the variant out on that basis.
+
 ### Vendor timings, for cross-reference
 
 The vendor DT independently confirms the geometry and the SPI wiring, and
