@@ -767,6 +767,49 @@ effect, checks the boot-critical driver list, and writes
 `linux/linux-6.18.defconfig`. It exits non-zero if anything is missing, so
 it is safe to run in CI.
 
+### Editing the board DTS does not rebuild the DTB
+
+> [!WARNING]
+> **`mix compile` after a DTS edit ships the *previous* DTB.** This has
+> already put a wrong device tree on hardware once.
+
+`BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` makes Buildroot depend on the *path* of
+`linux/sun50i-h700-anbernic-rg40xx-v.dts`, not its contents — the same shape of
+trap as `uboot/uboot.env`. Editing the DTS does not make the kernel package
+out of date, so `make` copies nothing and `images/*.dtb` keeps its old content.
+
+It is worse than it sounds, because the artifact checksum *does* change (the
+DTS is under `linux/`, which is in `package_files()`). So the build looks like
+it did the right thing: a new checksum, a new artifact, a new firmware UUID —
+carrying a stale DTB.
+
+There is a second half. Once the DTB is rebuilt in the Docker volume, the
+*installed* artifact is still stale, and `mix compile` will not refresh it,
+because the source checksum has not changed since the bad build. Both halves
+have to be broken:
+
+```bash
+# 1. Force the kernel package to re-copy the DTS and rebuild
+docker run --rm --mount type=volume,src=nerves_system_rg40xxv-<id>,target=/home/nerves/project \
+  ... ghcr.io/nerves-project/nerves_system_br:1.34.1 \
+  bash -c 'make linux-rebuild && make'
+
+# 2. Force the artifact to be reinstalled from the volume
+rm -rf ~/.nerves/artifacts/nerves_system_rg40xxv-portable-0.1.0
+mix compile
+```
+
+Then check what actually shipped, rather than trusting the build:
+
+```bash
+dtc -I dtb -O dts ~/.nerves/artifacts/nerves_system_rg40xxv-portable-0.1.0/images/*.dtb \
+  | grep -o 'anbernic,rg40xx[a-z0-9-]*panel'
+```
+
+`make linux-dirclean` and a full rebuild is the heavier, always-correct
+version, and is what the display plan already recommends before believing any
+result.
+
 ## Notes on the boot chain
 
 ```
