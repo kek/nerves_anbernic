@@ -74,6 +74,26 @@ BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 # (libdrm_intel and friends), while modetest uses the generic KMS ioctls.
 BR2_PACKAGE_LIBDRM=y
 BR2_PACKAGE_LIBDRM_INSTALL_TESTS=y
+
+# Cairo, for Scenic. scenic_driver_local picks its backend from MIX_TARGET:
+# cairo-gtk on the host, cairo-fb under Nerves -- CPU rendering straight into
+# /dev/fb0, no GPU involved. Its docs name this exact symbol, and note that
+# the official Nerves systems set it by default; this system is not one of
+# those, so nothing pulled it in. Without it the driver has nothing to link
+# against.
+#
+# This is deliberately the GPU-independent path. The framebuffer here is
+# 640x480 XRGB8888, 1,228,800 bytes a frame, and a full-frame write measured
+# 604 fps unthrottled, so CPU-side compositing has ample headroom at this
+# size. Anything wanting GLES needs the Mali to bind first -- see
+# CONFIG_SUN50I_H6_PRCM_PPU in linux/nerves.fragment.
+#
+# freetype is not optional and Buildroot will not pull it in on cairo's
+# account: the driver's Makefile runs
+# `pkg-config --static --libs freetype2 cairo` for both cairo targets, so
+# without it the NIF fails to link rather than degrading to no text.
+BR2_PACKAGE_CAIRO=y
+BR2_PACKAGE_FREETYPE=y
 BR2_PACKAGE_LINUX_FIRMWARE=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT=y
