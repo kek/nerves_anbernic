@@ -113,26 +113,24 @@ BR2_PACKAGE_FREETYPE=y
 # OPENGL_EGL selects GBM on its own; it is listed anyway because kmscube
 # depends on the GBM feature symbols directly and a silent deselect here would
 # be hard to spot.
-# DISABLED: does not fit in the build environment. Measured, not guessed --
-# this was built until the disk ran out, twice. LLVM alone costs about 28.5 GB
-# of build tree:
+# DISABLED, but only just, and no longer for the original reason.
 #
-#   build/llvm-22.1.7          20 GB
-#   build/host-llvm-22.1.7    3.1 GB
-#   build/host-clang-22.1.7   3.0 GB
-#   build/host-llvm-cmake     2.4 GB
+# These options need patches/buildroot/0001-mesa3d-panfrost-without-target-llvm
+# applied to the Buildroot tree first. Without it, Buildroot's dependency chain
+# builds LLVM *for the target* -- ~28.5 GB of build tree -- and the build dies
+# with "No space left on device". With it, Mesa compiles and installs
+# libEGL.so, libGLESv2.so and the panfrost DRI driver into staging, using
+# host-side LLVM only.
 #
-# against a Docker Desktop VM capped at 63 GB (DiskSizeMiB 65536) that also
-# holds a 4.6 GB kernel tree and 12 GB of host tools. The first attempt died
-# linking libLLVM.so.22.1; after reclaiming 9.4 GB the second got as far as
-# the staging install and died there, with the volume at 100% and 132 KB free.
+# What is still unsolved is shipping it rather than building it. The artifact
+# step copies the whole host/ tree (13 GB, since staging is a symlink into it)
+# and tars it, so peak usage is roughly double. That does not fit in a Docker
+# Desktop VM capped at 63 GB (DiskSizeMiB 65536) alongside the build trees.
 #
-# To enable: raise Docker's disk limit to ~96 GB (and check the host has room
-# for the VM image to grow), then uncomment. Nothing else here needs changing
-# -- the toolchain prerequisites are already satisfied.
+# To enable: apply the patch, raise Docker's disk to ~96 GB, uncomment. The
+# toolchain prerequisites were already satisfied and need no changes.
 #
 # BR2_PACKAGE_MESA3D=y
-# BR2_PACKAGE_MESA3D_LLVM=y
 # BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
 # BR2_PACKAGE_MESA3D_OPENGL_EGL=y
 # BR2_PACKAGE_MESA3D_OPENGL_ES=y

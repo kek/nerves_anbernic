@@ -1,0 +1,54 @@
+Build the Gallium panfrost driver without LLVM on the target.
+
+Mesa needs a compiler to precompile shaders at build time, not at runtime.
+mesa3d.mk already builds one for the host and passes -Dmesa-clc=system
+-Dprecomp-compiler=system to the target build, so the target LLVM that
+Buildroot's dependency chain pulls in is redundant. It costs ~20 GB of build
+tree plus target clang.
+
+See patches/buildroot/README.md for the full reasoning and for the two
+non-obvious parts: the make-level spirv-llvm-translator dependency, and the
+host-side RTTI mismatch.
+
+diff --git a/package/mesa3d/Config.in b/package/mesa3d/Config.in
+--- a/package/mesa3d/Config.in
++++ b/package/mesa3d/Config.in
+@@ -22,9 +22,7 @@ config BR2_PACKAGE_MESA3D_NEEDS_ELFUTILS
+
+ config BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER
+ 	bool
+-	select BR2_PACKAGE_MESA3D_OPENCL
+-	select BR2_PACKAGE_SPIRV_LLVM_TRANSLATOR
+ 	select BR2_PACKAGE_SPIRV_TOOLS
+
+ config BR2_PACKAGE_MESA3D_LLVM
+ 	bool "llvm support"
+@@ -205,11 +203,9 @@ config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_NOUVEAU
+ config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST
+ 	bool "Gallium panfrost driver"
+ 	depends on BR2_TOOLCHAIN_HAS_SYNC_4 || !BR2_PACKAGE_XORG7 # libxshmfence
+-	depends on BR2_PACKAGE_MESA3D_LLVM
+ 	select BR2_PACKAGE_MESA3D_GALLIUM_DRIVER
+ 	select BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER
+-	select BR2_PACKAGE_MESA3D_RUSTICL_SUPPORTED_DRIVER
+ 	help
+ 	  Mesa driver for ARM Mali Midgard and Bifrost GPUs.
+
+diff --git a/package/mesa3d/mesa3d.mk b/package/mesa3d/mesa3d.mk
+--- a/package/mesa3d/mesa3d.mk
++++ b/package/mesa3d/mesa3d.mk
+@@ -157,7 +157,7 @@ endif
+ ifeq ($(BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER),y)
+ MESA3D_CONF_OPTS += -Dmesa-clc=system -Dprecomp-compiler=system
+-MESA3D_DEPENDENCIES += host-mesa3d spirv-llvm-translator spirv-tools
++MESA3D_DEPENDENCIES += host-mesa3d spirv-tools
+ endif
+
+@@ -309,6 +309,7 @@ HOST_MESA3D_CONF_ENV = \
+ 	LLVM_CONFIG="$(HOST_DIR)/bin/llvm-config"
+
+ HOST_MESA3D_CONF_OPTS = \
++	-Dcpp_rtti=false \
+ 	-Dglvnd=disabled \
+ 	-Dgallium-drivers=$(subst $(space),$(comma),$(HOST_MESA3D_GALLIUM_DRIVERS-y)) \
+ 	-Dtools=$(subst $(space),$(comma),$(HOST_MESA3D_TOOLS)) \
