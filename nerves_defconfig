@@ -94,6 +94,55 @@ BR2_PACKAGE_LIBDRM_INSTALL_TESTS=y
 # without it the NIF fails to link rather than degrading to no text.
 BR2_PACKAGE_CAIRO=y
 BR2_PACKAGE_FREETYPE=y
+
+# Mesa, for GLES2 on the Mali-G31. The kernel side works as of
+# CONFIG_SUN50I_H6_PRCM_PPU -- panfrost binds and /dev/dri/renderD128 exists --
+# but a render node is not an API. Everything that wants the GPU wants EGL and
+# GLES2 on top of it: Emerge's DRM/KMS backend requires "OpenGL ES 2 or newer",
+# and libretro cores expect the same.
+#
+# This is not a cheap addition, and the reason is not obvious from the option
+# list. Buildroot 2026.05.1 makes the Gallium panfrost driver
+# `depends on BR2_PACKAGE_MESA3D_LLVM`, and panfrost also force-selects
+# NEEDS_PRECOMP_COMPILER, which pulls in MESA3D_OPENCL, SPIRV_LLVM_TRANSLATOR
+# and SPIRV_TOOLS. So asking for panfrost asks for LLVM on the target and a
+# SPIR-V toolchain with it. The toolchain prerequisites were already met
+# (BR2_INSTALL_LIBSTDCPP, threads, wchar, non-static), so this costs build
+# time and disk rather than a toolchain rebuild.
+#
+# OPENGL_EGL selects GBM on its own; it is listed anyway because kmscube
+# depends on the GBM feature symbols directly and a silent deselect here would
+# be hard to spot.
+# DISABLED: does not fit in the build environment. Measured, not guessed --
+# this was built until the disk ran out, twice. LLVM alone costs about 28.5 GB
+# of build tree:
+#
+#   build/llvm-22.1.7          20 GB
+#   build/host-llvm-22.1.7    3.1 GB
+#   build/host-clang-22.1.7   3.0 GB
+#   build/host-llvm-cmake     2.4 GB
+#
+# against a Docker Desktop VM capped at 63 GB (DiskSizeMiB 65536) that also
+# holds a 4.6 GB kernel tree and 12 GB of host tools. The first attempt died
+# linking libLLVM.so.22.1; after reclaiming 9.4 GB the second got as far as
+# the staging install and died there, with the volume at 100% and 132 KB free.
+#
+# To enable: raise Docker's disk limit to ~96 GB (and check the host has room
+# for the VM image to grow), then uncomment. Nothing else here needs changing
+# -- the toolchain prerequisites are already satisfied.
+#
+# BR2_PACKAGE_MESA3D=y
+# BR2_PACKAGE_MESA3D_LLVM=y
+# BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
+# BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+# BR2_PACKAGE_MESA3D_OPENGL_ES=y
+# BR2_PACKAGE_MESA3D_GBM=y
+
+# kmscube is the smallest honest test that the whole stack works: it opens the
+# DRM device, creates a GBM surface, brings up EGL, and spins a GLES2 cube on
+# the panel. "libEGL.so exists" does not distinguish a working driver from a
+# stub, and this does.
+# BR2_PACKAGE_KMSCUBE=y
 BR2_PACKAGE_LINUX_FIRMWARE=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT=y
