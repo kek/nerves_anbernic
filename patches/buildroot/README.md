@@ -61,10 +61,19 @@ it, host-mesa3d's configure fails with
 set from the defconfig without pulling target LLVM back in -- hence disabling
 RTTI on the Mesa side instead.
 
-### Still unresolved
+### Disk, and a trap that looks like a disk problem
 
-Building Mesa is not the same as shipping it. The artifact step copies the
-whole `host/` tree (13 GB, since `staging` is a symlink into it) and tars it,
-so the peak needs roughly double. That does not fit in a Docker Desktop VM
-capped at 63 GB alongside the build trees. Raising `DiskSizeMiB` to ~96 GB is
-the remaining step -- a much smaller ask than before this patch.
+This fits in a 63 GB Docker Desktop VM, but only after one piece of cleanup
+that is easy to mistake for needing a bigger disk.
+
+The artifact step copies the sysroot and tars it, so a bloated sysroot is paid
+for twice. An *aborted* target-LLVM build leaves its staging install behind:
+1.86 GB of `libLLVM.so.22.1` plus several hundred `libLLVM*.a`, which took the
+sysroot from ~1.2 GB to 10 GB. Nothing depends on those files once the patch
+is applied, and Buildroot never removes them, so every subsequent packaging
+attempt failed with "No space left on device" while the real fault was
+orphaned files. Removing them from
+`host/aarch64-buildroot-linux-gnu/sysroot/usr/lib` fixed it.
+
+If you hit disk errors during the artifact step, measure the sysroot before
+concluding the VM is too small.

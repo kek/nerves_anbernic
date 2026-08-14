@@ -101,46 +101,38 @@ BR2_PACKAGE_FREETYPE=y
 # GLES2 on top of it: Emerge's DRM/KMS backend requires "OpenGL ES 2 or newer",
 # and libretro cores expect the same.
 #
-# This is not a cheap addition, and the reason is not obvious from the option
-# list. Buildroot 2026.05.1 makes the Gallium panfrost driver
-# `depends on BR2_PACKAGE_MESA3D_LLVM`, and panfrost also force-selects
-# NEEDS_PRECOMP_COMPILER, which pulls in MESA3D_OPENCL, SPIRV_LLVM_TRANSLATOR
-# and SPIRV_TOOLS. So asking for panfrost asks for LLVM on the target and a
-# SPIR-V toolchain with it. The toolchain prerequisites were already met
-# (BR2_INSTALL_LIBSTDCPP, threads, wchar, non-static), so this costs build
-# time and disk rather than a toolchain rebuild.
+# REQUIRES patches/buildroot/0001-mesa3d-panfrost-without-target-llvm applied
+# to the Buildroot tree. `mix deps.get` replaces that tree, so reapply it after
+# any dependency refresh or this will try to build LLVM for the target and run
+# the build environment out of disk.
+#
+# Buildroot 2026.05.1 has the panfrost driver `depends on
+# BR2_PACKAGE_MESA3D_LLVM` and force-selecting NEEDS_PRECOMP_COMPILER, which
+# pulls in MESA3D_OPENCL, SPIRV_LLVM_TRANSLATOR and SPIRV_TOOLS. That chain
+# asks for LLVM and clang cross-compiled for the device -- about 28.5 GB of
+# build tree. Mesa does not need any of it at runtime; it needs a compiler to
+# precompile shaders at build time, and mesa3d.mk already builds one for the
+# host and points the target build at it with -Dmesa-clc=system
+# -Dprecomp-compiler=system. The patch drops the redundant target half.
+#
+# Built and shipping: mesa3d 26.1.2 with libEGL.so, libGLESv2.so, libgbm.so,
+# and panfrost compiled into libgallium-26.1.2.so.
 #
 # OPENGL_EGL selects GBM on its own; it is listed anyway because kmscube
 # depends on the GBM feature symbols directly and a silent deselect here would
 # be hard to spot.
-# DISABLED, but only just, and no longer for the original reason.
-#
-# These options need patches/buildroot/0001-mesa3d-panfrost-without-target-llvm
-# applied to the Buildroot tree first. Without it, Buildroot's dependency chain
-# builds LLVM *for the target* -- ~28.5 GB of build tree -- and the build dies
-# with "No space left on device". With it, Mesa compiles and installs
-# libEGL.so, libGLESv2.so and the panfrost DRI driver into staging, using
-# host-side LLVM only.
-#
-# What is still unsolved is shipping it rather than building it. The artifact
-# step copies the whole host/ tree (13 GB, since staging is a symlink into it)
-# and tars it, so peak usage is roughly double. That does not fit in a Docker
-# Desktop VM capped at 63 GB (DiskSizeMiB 65536) alongside the build trees.
-#
-# To enable: apply the patch, raise Docker's disk to ~96 GB, uncomment. The
-# toolchain prerequisites were already satisfied and need no changes.
-#
-# BR2_PACKAGE_MESA3D=y
-# BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
-# BR2_PACKAGE_MESA3D_OPENGL_EGL=y
-# BR2_PACKAGE_MESA3D_OPENGL_ES=y
-# BR2_PACKAGE_MESA3D_GBM=y
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_MESA3D_GBM=y
+BR2_PACKAGE_KMSCUBE=y
 
 # kmscube is the smallest honest test that the whole stack works: it opens the
 # DRM device, creates a GBM surface, brings up EGL, and spins a GLES2 cube on
 # the panel. "libEGL.so exists" does not distinguish a working driver from a
 # stub, and this does.
-# BR2_PACKAGE_KMSCUBE=y
+
 BR2_PACKAGE_LINUX_FIRMWARE=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT=y
