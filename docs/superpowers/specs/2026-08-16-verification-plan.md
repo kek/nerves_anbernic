@@ -1,7 +1,15 @@
 # Plan: verifying what was inherited but never tested
 
 **Date:** 2026-08-16
-**Status:** Plan. Nothing here has been run yet.
+**Status:** Phase 1 has been run against the device. Results are recorded
+against each item below. Phase 2 needs a person holding the board, and
+`scenic_rg40xxv` now puts those readings on the panel so that it only needs
+one.
+
+Phase 1 found three passes and one real failure. The failure is Bluetooth,
+and it is the same shape as everything else in the table below: an `hci0`
+exists, so every cheap check says yes, and the controller has in fact been
+dead since the first boot.
 
 ## Why this exists
 
@@ -69,6 +77,19 @@ File.read!("/sys/class/power_supply/axp20x-battery/status")
 The cable test matters: a static plausible number is the failure that passes
 inspection.
 
+**Result: pass.** Both supplies are present, `axp20x-battery` and
+`axp20x-usb`. The battery reported `capacity 83`, `status Charging`,
+`voltage_now 4192000`, `current_now 1747000`, `health Good`.
+
+The static-number failure is ruled out without needing the cable: capacity
+went 83 → 84 between two runs a few minutes apart, and the current moved
+1747000 → 1721000 → 1657000 across three. It is a live gauge, not a constant.
+
+Still outstanding, and it needs a hand: `status` has only ever been observed
+as `Charging`, because the device is powered over the USB gadget. That it
+*changes* to `Discharging` is unverified. This is now a row on the
+diagnostics screen.
+
 ### 1.2 Thermal
 
 `CONFIG_SUN8I_THERMAL=y`, never read. Relevant now that the GPU is real —
@@ -87,6 +108,20 @@ Path.wildcard("/sys/class/thermal/thermal_zone*/temp")
 
 Load it with `kmscube` (press A) and re-read. No rise means no real sensor.
 
+**Result: pass, including the part that needed load.** Four zones, and they
+were driven rather than merely read — 45 seconds of busy loops on all four
+schedulers, sampled before and after:
+
+| Zone | Idle | Loaded | Δ |
+|---|---|---|---|
+| `cpu-thermal` | 47.9 °C | 57.7 °C | **+9.8** |
+| `ve-thermal` | 46.8 °C | 53.8 °C | +7.0 |
+| `gpu-thermal` | 47.6 °C | 53.5 °C | +5.9 |
+| `ddr-thermal` | 47.5 °C | 53.3 °C | +5.8 |
+
+`cpu-thermal` moving most under a CPU load is the detail that makes these
+real sensors rather than one value copied to four files.
+
 ### 1.3 RTC
 
 `CONFIG_RTC_DRV_SUN6I=y`. Nerves sets `update_clock: true`, so a broken RTC is
@@ -104,6 +139,22 @@ System.cmd("hwclock", ["-r"])
 Worth knowing whether the board even has a backup cell; if not, "fails across
 power cycles" is expected rather than a bug.
 
+**Result: pass — but `hwclock` is not in the image.** The command this plan
+specified does not exist on the device, which is worth saying plainly: a
+verification step that cannot be run is not a step. sysfs answers it anyway:
+
+    rtc0/name        sun6i-rtc 7000000.rtc
+    rtc0/date        2026-08-15
+    rtc0/time        23:24:51
+    rtc0/hctosys     1
+
+`hctosys 1` is the load-bearing line. It means the kernel used this RTC to
+set the system clock at boot, so the RTC held a sane time *before* the network
+came up — which is the only part NTP cannot fake afterwards. The reading also
+matched `NaiveDateTime.utc_now()` to the second.
+
+Whether it survives a power cycle is still open, and needs the device off.
+
 ### 1.4 Bluetooth presence
 
 `CONFIG_BT=m` with `BT_HCIUART_RTL=y`. The boot report already shows the
@@ -120,6 +171,69 @@ System.cmd("hciconfig", ["-a"])
   firmware is present and the UART/enable path is the suspect.
 
 Stop here in phase 1. Pairing is phase 2.
+
+**Result: fail — and the stated pass criterion was wrong.**
+
+An `hci0` does exist under `/sys/class/bluetooth`. By the criterion written
+above that is a pass, and it is not: the controller is dead. This plan set out
+to name the command that separates working from plausible-looking and then,
+on this item, named a plausible-looking one. Worth keeping visible.
+
+Two things gave it away. The `hci0` directory has no `address` attribute,
+which a controller that finished setup would have. And `dmesg` says so
+outright:
+
+    Bluetooth: hci0: RTL: loading rtl_bt/rtl8821cs_fw.bin
+    Bluetooth: hci0: RTL: loading rtl_bt/rtl8821cs_config.bin
+    bluetooth hci0: Direct firmware load for rtl_bt/rtl8821cs_config.bin
+                    failed with error -2
+    Bluetooth: hci0: RTL: mandatory config file rtl_bt/rtl8821cs_config
+                    not found
+
+The chip needs two blobs. `rtl8821cs_fw.bin` is on the device;
+`rtl8821cs_config.bin` is not, and `btrtl` treats it as mandatory, so setup
+aborts. The suspicion recorded above — that the shared firmware is present
+because the WiFi half works — was right about the chip and wrong about the
+file.
+
+### Why the file is missing
+
+Not a board problem. linux-firmware ships no such *file*; `WHENCE` declares
+it as a symlink:
+
+    Link: rtl_bt/rtl8821cs_config.bin -> rtl8761b_config.bin
+
+Buildroot packages the glob `rtl_bt/rtl88*.bin` for
+`BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT`, then recreates `WHENCE` symlinks
+**only where the target was packaged**. `rtl8761b_config.bin` does not match
+`rtl88*`, so the link is skipped silently. No warning, no build failure.
+
+### The fix, and how it was checked without a rebuild
+
+`BR2_PACKAGE_LINUX_FIRMWARE_RTL_87XX_BT=y` lists `rtl_bt/rtl8761b_config.bin`
+explicitly. One line in `nerves_defconfig`; the comment there has the detail.
+
+Buildroot's install step was then simulated against the real `WHENCE` and the
+real globs, and the simulation was calibrated before being trusted. Run
+against the *current* config it predicts exactly two created symlinks —
+`rtl8723d_config.bin` and `rtl8821a_config.bin` — and those are exactly the
+two on the device, present for the same reason (they point at
+`rtl8821c_config.bin`, which `rtl88*` does match). A model that reproduces
+the observed state, run with the fix, produces
+`rtl8821cs_config.bin -> rtl8761b_config.bin`.
+
+That is strong, and it is still not the device. **Unverified on hardware:**
+this has not been built or flashed. The diagnostics screen shows all three of
+`hci0`, `address` and the config blob, so confirming it after the next flash
+is a glance.
+
+### A second gap, not yet decided
+
+There is no BlueZ in the image — `hciconfig`, `bluetoothctl`, `btmgmt` and
+`btattach` are all absent. Even with the firmware fixed, nothing in userspace
+can bring the controller up or pair anything. Choosing between
+`bluez5_utils` (large, needs D-Bus) and an Elixir-side stack is a real
+decision about the platform, so it is left open rather than settled here.
 
 ---
 
@@ -153,6 +267,32 @@ already registered as an input device (`event2`), so plugging a jack should
 produce a switch event. That it enumerates says the DT describes it; it does
 not say the detect pin is right.
 
+**Half of this is already answered, silently.** No sound has been played.
+
+The codec bound. `aplay -l` lists *card 0: Codec [H616 Audio Codec]*,
+`/dev/snd/pcmC0D0p` exists, and `sun4i_codec` is loaded. That removes the
+first failure mode entirely — this is not another module that quietly failed
+to autoload.
+
+And the prediction about the mixer was right, which matters because it is the
+thing that would have been misread:
+
+| Control | State |
+|---|---|
+| `Speaker` | on |
+| `DAC` | 100%, switch **off** |
+| `Line Out` | **0%**, switch **off** |
+| `DAC Reversed` | off |
+
+So the device is muted at the mixer *right now*. Had `speaker-test` been run
+first, it would have produced silence, and silence would have looked like
+evidence about the device tree. It would have been evidence about a default.
+
+What is left is genuinely only: unmute, play, listen. `ScenicRg40xxv.Audio`
+does exactly that in one step — and refuses unless
+`config :scenic_rg40xxv, audio_test: true`, which is `false`. Nothing plays
+until someone sets it.
+
 ### 2.2 Volume buttons
 
 `gpio-keys-volume` is on `event1`, separate from the gamepad, and unlike the
@@ -172,6 +312,21 @@ Read the expected codes from the DT first, the way the gamepad map was
 derived — `/sys/firmware/devicetree/base/gpio-keys-volume/*/linux,code`. Do
 not assume `KEY_VOLUMEUP`; the gamepad taught us the obvious guess can be
 wrong in a way nothing reports.
+
+**Codes read, presses still needed.** From the device tree:
+
+    button-vol-down   "Key Volume Down"   114   KEY_VOLUMEDOWN
+    button-vol-up     "Key Volume Up"     115   KEY_VOLUMEUP
+
+This time the obvious guess was right — which is only known because it was
+checked. `ScenicRg40xxv.Diagnostics` opens `event1` and counts each
+direction, so the remaining half is pressing both and watching two counters
+move.
+
+The gamepad map was re-read at the same time and confirms what
+`ScenicRg40xxv.Launcher` documents: `Action-Pad A` is 305 (`BTN_EAST`) and
+`Action-Pad B` is 304 (`BTN_SOUTH`). X (307) and Y (308) need no such
+translation — the Nintendo layout only disagrees with Linux about A and B.
 
 ### 2.3 Charging behaviour under load
 
@@ -199,6 +354,15 @@ Two routes:
 Do (2) first. It is minutes rather than a Buildroot cycle, and it tells you
 whether `poweroff/0` even brings the board down cleanly on this hardware —
 which is the part that is actually unknown. Then do (1) properly.
+
+**Route (2) is done, unpressed.** Hold Select and press Menu
+(`BTN_SELECT` 314 + `BTN_MODE` 316) and `ScenicRg40xxv.Launcher` calls
+`Nerves.Runtime.poweroff/0`. A chord rather than a button because it is not
+undoable and this is a handheld that gets carried in a pocket.
+
+Deliberately not tested from here. It would have put the device down with
+nobody near it, and the only way back is the power button. Route (1) is still
+the proper fix and still open.
 
 ### 3.2 Kernel config trimming
 
@@ -243,8 +407,44 @@ reading a config file:
 |---|---|
 | Display, panel variant, GPU, GLES | yes |
 | Gamepad buttons, LEDs, WiFi, USB gadget | yes |
-| Battery, thermal, RTC, Bluetooth | no |
-| Audio | no |
-| Volume buttons | no |
-| Power-off | known gap |
+| Battery gauge is live | **yes** — capacity and current both move |
+| Thermal, all four zones | **yes** — all rise under load, CPU zone most |
+| RTC | **yes** — sane date, and it set the clock at boot |
+| Bluetooth | **no — broken.** Missing firmware blob, fix written, not flashed |
+| Audio codec bound | **yes** — card 0 present, mixer measured muted |
+| Audio audible | no — needs a person, and needs arming |
+| Volume button codes | **yes** — 114 / 115, from the DT |
+| Volume buttons press | no — needs a person |
+| Headphone jack detect | no — needs a jack |
+| Battery discharge | no — needs the cable pulled |
+| Power-off | route (2) implemented, never pressed |
 | HDMI | unknown, possibly not wired |
+
+## Putting the rest on the panel
+
+Everything still unverified has the same blocker: it needs someone holding
+the device. Written as instructions, each one is a session over SSH with a
+second machine. So they were moved onto the screen instead —
+`ScenicRg40xxv.Diagnostics` collects the readings and
+`ScenicRg40xxv.Scene.Diagnostics` draws them, reachable with **Y**.
+
+Rows are coloured by meaning rather than by value: green proves a thing
+works, red proves it does not, and amber means *nobody has done the physical
+half yet*. Amber is the one that matters. Every failure in the table at the
+top of this document was a case of "not tested" being read as "fine", and a
+screen that only had green and red would reproduce that exact mistake.
+
+The rows waiting on a person are marked with a bullet:
+
+    • pull cable      battery status must flip to Discharging
+    • press A         gpu-thermal must rise while kmscube runs
+    • press both      volume up and down counters must each move
+    • plug/unplug     the jack switch must change
+
+Bluetooth shows `hci0`, `address` and the config blob as three separate rows,
+because the first is exactly the check that lied.
+
+Audio is shown and not played. The mixer state is on screen; the test is
+built, armed by `config :scenic_rg40xxv, audio_test: false`, and bound to
+**X** once that is `true`. It unmutes and plays in one step, so the result is
+interpretable the first time.
