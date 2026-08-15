@@ -136,6 +136,40 @@ BR2_PACKAGE_KMSCUBE=y
 BR2_PACKAGE_LINUX_FIRMWARE=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_87XX_BT=y
+
+# The 87xx option is not a typo, and it is what makes Bluetooth work.
+#
+# This board's RTL8821CS needs two blobs. rtl8821cs_fw.bin arrives via the
+# 88xx option above, whose file list is the glob rtl_bt/rtl88*.bin. The
+# config blob does not, and the driver treats it as mandatory:
+#
+#     Bluetooth: hci0: RTL: loading rtl_bt/rtl8821cs_config.bin
+#     bluetooth hci0: Direct firmware load for rtl_bt/rtl8821cs_config.bin
+#                     failed with error -2
+#     Bluetooth: hci0: RTL: mandatory config file rtl_bt/rtl8821cs_config
+#                     not found
+#
+# Setup then aborts. hci0 still appears under /sys/class/bluetooth, so the
+# usual "is there an hci0" check passes while Bluetooth is entirely dead --
+# the same shape of silent failure as the green screen and the -110 GPU.
+#
+# The cause is upstream packaging, not this board. linux-firmware ships no
+# rtl8821cs_config.bin file; WHENCE declares it as a symlink:
+#
+#     Link: rtl_bt/rtl8821cs_config.bin -> rtl8761b_config.bin
+#
+# Buildroot recreates WHENCE symlinks only when the target was packaged, and
+# rtl8761b_config.bin does not match rtl88*.bin, so the link is skipped
+# without a word. The 87xx option lists that file explicitly.
+#
+# The mechanism is confirmed on the device rather than assumed: rtl8723d_
+# config.bin and rtl8821a_config.bin are both present there and both exist
+# only as WHENCE symlinks -- they survive because they point at
+# rtl8821c_config.bin, which the 88xx glob does match.
+#
+# This ships four 87xx firmware files that are dead weight on this board.
+# That is the cost of getting one symlink target, and it is small.
 BR2_PACKAGE_WIRELESS_REGDB=y
 BR2_PACKAGE_WPA_SUPPLICANT=y
 BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y
