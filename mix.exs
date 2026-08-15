@@ -3,7 +3,13 @@ defmodule NervesSystemRG40XXV.MixProject do
 
   @github_organization "kek"
   @app :nerves_system_rg40xxv
-  @source_url "https://github.com/#{@github_organization}/nerves_anbernic"
+  # The repository is named after the system, so both this and artifact_sites
+  # below are derived from @app rather than spelled out. They were out of step
+  # until the repository was renamed from nerves_anbernic, and a stale
+  # artifact_sites entry is not loud about it: builds just look for prebuilt
+  # artifacts in a repository that does not exist and fall back to building
+  # from source.
+  @source_url "https://github.com/#{@github_organization}/#{@app}"
   @version Path.join(__DIR__, "VERSION")
            |> File.read!()
            |> String.trim()
@@ -64,7 +70,7 @@ defmodule NervesSystemRG40XXV.MixProject do
     [
       type: :system,
       artifact_sites: [
-        {:github_releases, "#{@github_organization}/nerves_anbernic"}
+        {:github_releases, "#{@github_organization}/#{@app}"}
       ],
       build_runner_opts: build_runner_opts(),
       platform: Nerves.System.BR,

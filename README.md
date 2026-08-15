@@ -277,14 +277,14 @@ system dependency with this one:
 
 ```elixir
 {:nerves_system_rg40xxv,
- path: "../nerves_anbernic", runtime: false, targets: :rg40xxv}
+ path: "../nerves_system_rg40xxv", runtime: false, targets: :rg40xxv}
 ```
 
 or, to pull it straight from git:
 
 ```elixir
 {:nerves_system_rg40xxv,
- github: "kek/nerves_anbernic", runtime: false, targets: :rg40xxv}
+ github: "kek/nerves_system_rg40xxv", runtime: false, targets: :rg40xxv}
 ```
 
 Then:
@@ -749,8 +749,8 @@ is the one still unexercised.
 You only need this if you are changing the system itself.
 
 ```bash
-git clone https://github.com/kek/nerves_anbernic
-cd nerves_anbernic
+git clone https://github.com/kek/nerves_system_rg40xxv
+cd nerves_system_rg40xxv
 mix deps.get
 mix compile          # builds via Docker on macOS, natively on Linux
 ```
