@@ -15,7 +15,15 @@ Phase 2 has since been done by hand. Battery charge/discharge, the volume
 buttons and headphone detect all pass. Only audibility is left, and it is
 waiting on a decision rather than on evidence.
 
-Bluetooth is now fixed and confirmed on hardware.
+Bluetooth is now fixed and confirmed on hardware, and audio is confirmed
+working. Every item this document set out to check has an answer from the
+device.
+
+The audio result is the one that vindicates the method. The mixer was
+measured muted *before* anything was played, so when the tone was finally
+played the result could only mean one thing. Reversing those two steps would
+have produced silence and a plausible, wrong conclusion about the device
+tree — which is precisely how the green screen happened.
 
 Four things in this document turned out to be wrong, and all four are
 corrected in place rather than deleted: the pass criterion for Bluetooth
@@ -410,10 +418,29 @@ So the device is muted at the mixer *right now*. Had `speaker-test` been run
 first, it would have produced silence, and silence would have looked like
 evidence about the device tree. It would have been evidence about a default.
 
-What is left is genuinely only: unmute, play, listen. `ScenicRg40xxv.Audio`
-does exactly that in one step — and refuses unless
-`config :scenic_rg40xxv, audio_test: true`, which is `false`. Nothing plays
-until someone sets it.
+**Result: pass. Audio works.** Mixer unmuted, 440 Hz played, speaker produced
+it. So the codec routing inherited from `rg35xx-plus.dts` *does* describe
+this board, and the largest remaining question about that inheritance is
+closed.
+
+The order was the whole point. Playing first would have produced silence from
+a muted mixer, and this document would have recorded silence as evidence
+against the inherited device tree. It would have been evidence about a
+default. Unmute, then play.
+
+Two things fell out of the test.
+
+**The tone did not play on the first attempt**, and not because of the
+hardware: `speaker-test -P 1` is rejected outright with `Invalid number of
+periods 1`, exit 1, since the minimum is 2. That flag was in
+`ScenicRg40xxv.Audio`, so the first press of the button would have produced
+nothing and looked exactly like a dead speaker. A verification tool that
+fails closed and blames the device is worse than no tool.
+
+**This board powers on muted.** There is no `/var/lib/alsa/asound.state` and
+nothing runs `alsactl restore`, so `DAC` and `Line Out` return to off on
+every boot. `ScenicRg40xxv.Audio.unmute/0` now runs at startup, ungated,
+because it makes no sound and a games machine that boots silent is broken.
 
 **Headphone detect: pass.** Plugging a jack in is detected. So the DT does
 not merely describe the jack, the detect pin is wired and reports. That is
@@ -552,8 +579,9 @@ reading a config file:
 | RTC | **yes** — sane date, and it set the clock at boot |
 | Volume buttons | **yes** — both directions register |
 | Headphone jack detect | **yes** — plug detected |
-| Audio codec bound | **yes** — card 0 present, mixer measured muted |
-| Audio audible | no — needs a person, and needs arming |
+| Audio codec bound | **yes** — card 0 present |
+| Audio audible | **yes** — 440 Hz out of the speaker, after unmuting |
+| Audio survives a reboot | no — board powers on muted, app unmutes at boot |
 | Bluetooth controller initialises | **yes** — fixed, flashed, `fw version 0x75b8f098` |
 | Bluetooth usable (scan/pair) | no — no BlueZ in the image |
 | Power-off | route (2) implemented, never pressed |
