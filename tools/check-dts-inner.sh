@@ -73,6 +73,56 @@ assert_match "inherited power LED still present" 'function = "power"'
 assert_match "RTL8821CS SDIO WiFi node inherited" 'wifi@1'
 assert_match "Bluetooth node inherited" 'realtek,rtl8821cs-bt'
 
+# The second card slot. mmc@4022000 is disabled in sun50i-h616.dtsi and no
+# mainline board in this family enables it, so this is entirely ours and there
+# is no upstream to notice if it regresses. Assert against the decompiled DTB
+# rather than the source: the whole point is that status actually reached the
+# node we think it did.
+mmc2_status=$(fdtget /tmp/board.dtb /soc/mmc@4022000 status 2>/dev/null || echo MISSING)
+if [ "$mmc2_status" = "okay" ]; then
+    echo "  ok       second card slot mmc@4022000 is enabled"
+else
+    echo "  FAILED   mmc@4022000 status is '$mmc2_status', wanted okay."
+    echo "           That node is the games card slot; disabled means the"
+    echo "           card never appears as a block device at all."
+    rc=1
+fi
+# Card detect and the slot's 3V3 switch. Both are on bank PE and both were
+# cross-checked against Anbernic's vendor DTB -- see the comment on &mmc2 in
+# the DTS. A wrong cd-gpios is the nasty one: the slot probes cleanly and
+# simply never notices a card.
+mmc2_cd=$(fdtget -t x /tmp/board.dtb /soc/mmc@4022000 cd-gpios 2>/dev/null || echo MISSING)
+case "$mmc2_cd" in
+    *" 4 16 1"|*" 0x4 0x16 0x1") echo "  ok       mmc2 card detect is PE22, active low" ;;
+    *) echo "  FAILED   mmc2 cd-gpios reads '$mmc2_cd', wanted bank 4 pin 0x16 flag 1 (PE22, active low)"
+       rc=1 ;;
+esac
+assert_match "mmc2 3V3 load switch present" 'regulator-name = "vcc3v3-mmc2"'
+# 4-bit, and 3V3-only. The vendor DTB sets sunxi-dis-signal-vol-sw; dropping
+# no-1-8-v would let the core try a UHS voltage switch the slot cannot do.
+mmc2_bw=$(fdtget /tmp/board.dtb /soc/mmc@4022000 bus-width 2>/dev/null || echo MISSING)
+if [ "$mmc2_bw" = "4" ]; then
+    echo "  ok       mmc2 bus-width is 4"
+else
+    echo "  FAILED   mmc2 bus-width is '$mmc2_bw', wanted 4"
+    rc=1
+fi
+if fdtget /tmp/board.dtb /soc/mmc@4022000 no-1-8-v >/dev/null 2>&1; then
+    echo "  ok       mmc2 is pinned to 3V3 signalling (no-1-8-v)"
+else
+    echo "  FAILED   mmc2 has no no-1-8-v; the slot has no 1V8 rail"
+    rc=1
+fi
+
+# The boot slot must stay untouched by all of the above. root=/dev/mmcblk0p2
+# is on the kernel command line, so a change here is an unbootable image.
+mmc0_cd=$(fdtget -t x /tmp/board.dtb /soc/mmc@4020000 cd-gpios 2>/dev/null || echo MISSING)
+case "$mmc0_cd" in
+    *" 5 6 1"|*" 0x5 0x6 0x1") echo "  ok       boot slot mmc@4020000 card detect is still PF6" ;;
+    *) echo "  FAILED   mmc0 cd-gpios reads '$mmc0_cd', wanted bank 5 pin 6 flag 1 (PF6)"
+       rc=1 ;;
+esac
+
 # Inherited from rg35xx-2024.dts.
 assert_match "AXP717 PMIC present" 'x-powers,axp717'
 assert_match "battery power supply present" 'axp717-battery-power-supply'

@@ -200,6 +200,20 @@
 			};
 		};
 	};
+
+	/*
+	 * 3V3 for the second card slot. Not a PMIC rail: a GPIO-controlled
+	 * load switch on PE4, in the same shape as reg_lcd above. Consumed
+	 * by &mmc2 below; see that node for where these values come from.
+	 */
+	reg_vcc3v3_mmc2: regulator-vcc3v3-mmc2 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3-mmc2";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pio 4 4 GPIO_ACTIVE_HIGH>; /* PE4 */
+		enable-active-high;
+	};
 };
 
 /*
@@ -214,6 +228,78 @@
 		color = <LED_COLOR_ID_RGB>;
 		gpios = <&pio 8 7 GPIO_ACTIVE_HIGH>; /* PI7 */
 	};
+};
+
+/*
+ * The second card slot -- the one the games card goes in.
+ *
+ * sun50i-h616.dtsi leaves mmc@4022000 status = "disabled" and no board in
+ * the Anbernic H700 family enables it in mainline, so every property below
+ * is taken from a source that describes this hardware rather than inferred
+ * from the SoC. Two independent sources agree on all of them:
+ *
+ *   1. ROCKNIX's copy of Chris Morgan's patch "arm64: dts: allwinner: h700:
+ *      Add MMC2 for Anbernic RG35XX" (Message-Id
+ *      <20241018160617.157083-2-macroalpha82@gmail.com>), which is a diff
+ *      against sun50i-h700-anbernic-rg35xx-2024.dts -- the file this DTS
+ *      inherits from through rg35xx-plus.dts:
+ *      https://github.com/ROCKNIX/distribution/blob/next/projects/ROCKNIX/devices/H700/patches/linux/0126-20241018_macroalpha82_rg35xx_add_additional_hardware_support.patch
+ *
+ *   2. A decompile of Anbernic's own vendor DTB for the RG40XX H, the
+ *      horizontal sibling of this board:
+ *      https://gist.github.com/macromorgan/c96590eb5bdad96771f26ef20bf20512
+ *      Its sdmmc@04022000 node (device_type = "sdc2") has bus-width = <4>,
+ *      cd-gpios on bank 4 pin 0x16, pwr-gpios on bank 4 pin 4, no-sdio and
+ *      no-mmc. Bank 4 is PE, so that is PE22 and PE4 -- the same two pins
+ *      Chris Morgan's patch uses. The same decompile puts mmc0's cd-gpios
+ *      on bank 5 pin 6, which is the PF6 mainline already uses for the boot
+ *      slot, so the bank/pin decoding is confirmed against a known-good
+ *      value rather than assumed.
+ *
+ * That the slot is mmc2 at all is from the same decompile: its aliases give
+ * sdc2 = "/soc@03000000/sdmmc@04022000" and sdc1 = ".../sdmmc@04021000",
+ * and sdc1 carries no-mmc + no-sd -- SDIO only, i.e. the WiFi part.
+ *
+ * Not overridden, deliberately:
+ *
+ *   pinctrl. The dtsi's mmc2_pins is PC0, PC1, PC5, PC6, PC8-PC11 and
+ *   PC13-PC16. The vendor DTB muxes exactly that set (its sdc2@0 group plus
+ *   the single-pin sdc2@2 strobe group), so the default group is right and
+ *   complete. Nothing else in this board's device tree touches bank PC --
+ *   checked -- and rg35xx-2024.dts already supplies vcc-pc-supply, so the
+ *   bank is powered. bus-width = <4> means only D0-D3 carry data; the rest
+ *   of the group is muxed but idle, which is what the vendor ships too.
+ *
+ *   aliases. Chris Morgan's patch also adds mmc0 = &mmc0, mmc1 = &mmc2,
+ *   mmc2 = &mmc1, which renumbers the *host* so the games slot is mmc1.
+ *   Skipped here for two reasons. Without any mmc alias, mmc_alloc_host()
+ *   allocates host indices from an IDA in probe order (drivers/mmc/core/
+ *   host.c), and probe order is device tree order -- 0x4020000, 0x4021000,
+ *   0x4022000 -- so the hosts already come out 0, 1, 2 with the names they
+ *   have here. And the alias would not buy what it looks like it buys:
+ *   mmcblkN is a *separate* IDA allocated in card-probe order in
+ *   mmc_blk_alloc() (drivers/mmc/core/block.c), not derived from the host
+ *   index, so no alias can pin the boot card to mmcblk0. See the note in
+ *   rootfs_overlay/boot/extlinux/ about that.
+ *
+ * This node only makes the block device appear. It is deliberately not
+ * partitioned, formatted or mounted by anything in this system -- the card
+ * belongs to the user and holds their games. Mounting it is the
+ * application's job.
+ */
+&mmc2 {
+	bus-width = <4>;
+	cd-gpios = <&pio 4 22 GPIO_ACTIVE_LOW>; /* PE22 */
+	disable-wp;
+	/*
+	 * The slot is 3V3-only -- the vendor DTB sets sunxi-dis-signal-vol-sw
+	 * and there is no 1V8 rail switched to it -- so never attempt a
+	 * signal voltage switch to UHS.
+	 */
+	no-1-8-v;
+	vmmc-supply = <&reg_vcc3v3_mmc2>;
+	vqmmc-supply = <&reg_cldo3>;
+	status = "okay";
 };
 
 /*

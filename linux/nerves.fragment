@@ -169,3 +169,27 @@ CONFIG_USB_CONFIGFS_ACM=y
 CONFIG_USB_MUSB_HDRC=y
 CONFIG_USB_MUSB_SUNXI=y
 CONFIG_USB_MUSB_GADGET=y
+
+# exFAT, for the second card slot.
+#
+# The games card that goes in that slot is formatted exFAT -- that is what
+# muOS puts there -- and the arm64 defconfig has no exFAT at all: before
+# this, /proc/filesystems on the device listed vfat, ext4 and f2fs and
+# nothing else. The slot itself is enabled by &mmc2 in
+# linux/sun50i-h700-anbernic-rg40xx-v.dts; this is the other half.
+#
+# Built in rather than a module, because the thing being fixed is a missing
+# line in /proc/filesystems, and a module only appears there once it has
+# been loaded. Nothing here mounts the card -- that is the application's
+# job -- so there is no load step to hang the module off, and this system
+# has no initramfs to autoload from either.
+#
+# No NLS symbol is needed with it, which is worth writing down because the
+# opposite is widely assumed. fs/exfat/Kconfig `select NLS` already, and
+# CONFIG_EXFAT_DEFAULT_IOCHARSET defaults to "utf8" -- and utf8 is the one
+# charset exFAT does NOT resolve through NLS. exfat_fill_super() branches on
+# opts->utf8 and installs exfat_utf8_dentry_ops directly; load_nls() is only
+# reached in the else arm, for an explicit non-utf8 iocharset= mount option
+# (fs/exfat/super.c). CONFIG_NLS_CODEPAGE_437 is already set by the arm64
+# defconfig and covers that case anyway.
+CONFIG_EXFAT_FS=y
