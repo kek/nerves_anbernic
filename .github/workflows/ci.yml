@@ -247,3 +247,22 @@ jobs:
           name: nerves_system_rg40xxv
           path: "*.tar.gz"
           if-no-files-found: error
+
+      # Publish it, so that depending on this system does not mean building
+      # it. mix.exs points artifact_sites at this repository's releases, and
+      # until the first release existed every `mix deps.get` in an application
+      # got a 404 and fell back to a multi-hour local Buildroot build.
+      #
+      # The filename carries the artifact checksum, which Nerves computes from
+      # package_files(). So a release is only useful to the exact tree that
+      # produced it: change anything under linux/, fwup_include/,
+      # rootfs_overlay/, uboot/, patches/, or mix.exs, nerves_defconfig,
+      # README.md, REUSE.toml, VERSION -- a comment is enough -- and the next
+      # deps.get looks for a checksum this asset does not have. That is what
+      # tags are for here, and why this step only runs on one.
+      - name: Publish the artifact to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.tar.gz"
+          fail_on_unmatched_files: true
