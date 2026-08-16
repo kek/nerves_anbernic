@@ -15,10 +15,20 @@ Phase 2 has since been done by hand. Battery charge/discharge, the volume
 buttons and headphone detect all pass. Only audibility is left, and it is
 waiting on a decision rather than on evidence.
 
-Two things in this document turned out to be wrong, and both are corrected
-in place rather than deleted: the pass criterion for Bluetooth, and the
-claim that the X and Y buttons needed no translation. A plan whose errors
-are edited out silently teaches nothing the second time.
+Bluetooth is now fixed and confirmed on hardware.
+
+Four things in this document turned out to be wrong, and all four are
+corrected in place rather than deleted: the pass criterion for Bluetooth
+(`an hci0 exists`), the replacement for it (`address`, an attribute this
+kernel does not have), the claim that the X and Y buttons needed no
+translation, and the instruction to detect GPU work by watching a
+temperature.
+
+Every one of them was an assertion about what a *healthy* system would look
+like, written by someone who had never seen one. That is the same mistake as
+the LPDDR4 timings and the green screen, in a document written to prevent
+it. A plan whose errors are edited out silently teaches nothing the second
+time.
 
 ## Why this exists
 
@@ -283,10 +293,40 @@ flashing it and reading `hci0`: an `address` attribute where there was none,
 and no `-2` in `dmesg`. The diagnostics screen shows all three of `hci0`,
 `address` and the config blob, so that is a glance rather than a session.
 
-**Still unconfirmed:** that the controller actually comes up. Shipping the
-file the driver asked for is not the same as the driver being happy with it,
-and this document has already been caught once treating a necessary
-condition as a sufficient one.
+**Confirmed on hardware.** Flashed, and `btrtl` completes setup:
+
+    Bluetooth: hci0: RTL: loading rtl_bt/rtl8821cs_config.bin
+    Bluetooth: hci0: RTL: cfg_sz 25, total sz 36953
+    Bluetooth: hci0: RTL: fw version 0x75b8f098
+
+It reads the 25-byte config, assembles 36953 bytes of firmware and reports a
+running version. No `-2`, no "mandatory config file not found". The
+controller initialises. **Bluetooth was broken since the first boot and is
+now fixed.**
+
+### The check that said otherwise
+
+The first look at the flashed device said `address: none`, and that was read
+as failure. It was not. `/sys/class/bluetooth/hci0` on this kernel contains
+`uevent`, `power`, `device`, `subsystem` and `rfkill1` — **there is no
+`address` attribute to read.** The row reported "none" on a healthy
+controller.
+
+Worse, that check was invented here. The paragraph above once said the
+address was "what distinguishes the two", when the actual evidence had always
+been the `-2` line in `dmesg`; the missing attribute merely correlated with
+it on a broken system. A necessary condition was promoted to a sufficient
+one, which is the failure this document was written to prevent, committed by
+the document itself.
+
+The diagnostics screen now reports what `btrtl` logged instead, and `hci0`
+presence is no longer coloured as a pass on its own.
+
+### What is still missing
+
+There is no BlueZ in the image, so nothing in userspace can scan or pair.
+The controller is alive; using it is a separate piece of work, and the
+choice between `bluez5_utils` and an Elixir-side stack is still open.
 
 ### What the rebuild cost, and a Buildroot trap worth keeping
 
@@ -514,7 +554,8 @@ reading a config file:
 | Headphone jack detect | **yes** — plug detected |
 | Audio codec bound | **yes** — card 0 present, mixer measured muted |
 | Audio audible | no — needs a person, and needs arming |
-| Bluetooth | **no — broken.** Fix built and present in the rootfs, not yet flashed |
+| Bluetooth controller initialises | **yes** — fixed, flashed, `fw version 0x75b8f098` |
+| Bluetooth usable (scan/pair) | no — no BlueZ in the image |
 | Power-off | route (2) implemented, never pressed |
 | GPU frequency scaling | none — devfreq is empty |
 | Thermal throttling | none — no cooling devices bound |
