@@ -133,6 +133,37 @@ BR2_PACKAGE_KMSCUBE=y
 # the panel. "libEGL.so exists" does not distinguish a working driver from a
 # stub, and this does.
 
+# udev, so that third-party Linux userland can find the gamepad.
+#
+# Nerves does not normally want this: device nodes come from devtmpfs and
+# nerves_uevent handles uevents in Elixir, so nothing in a stock Nerves system
+# needs a udev daemon. This is here for programs that are not Elixir.
+#
+# RetroArch is the case that forced it. Built without udev it renders
+# perfectly on this board -- Mali-G31 via Panfrost, GLES 3.1, shaders linked,
+# framebuffer allocated at 640x480 -- and then exits:
+#
+#     [Video] Graphics driver did not initialize an input driver.
+#     [ERROR] [Video] Cannot initialize input driver. Exiting...
+#
+# On Linux, udev *is* RetroArch's evdev path. Its only other input drivers are
+# linuxraw, which reads console keycodes and so cannot see gamepad BTN_*
+# events at all, and sdl, which needs SDL. There is no plain evdev driver, and
+# no /dev/input/js* here either: the kernel has evdev, kbd, sysrq, leds and
+# rfkill handlers and no joydev, so the legacy joystick API is not an option.
+#
+# Shipping libudev alone would not have been enough. input/drivers/udev_input.c
+# selects devices with udev_enumerate_add_match_property(..., "ID_INPUT_KEY",
+# "1"), and those properties are set by udev *rules*, which means udevd has to
+# have run. So this is the daemon and its rules, not just the library.
+#
+# DYNAMIC_EUDEV keeps devtmpfs and adds eudev on top; it selects
+# BR2_PACKAGE_EUDEV. Buildroot's init script for it does not run here, since
+# erlinit is PID 1 -- the application starts udevd and replays the input
+# uevents when it needs them, which keeps this out of the boot path that the
+# panel depends on.
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y
+
 BR2_PACKAGE_LINUX_FIRMWARE=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
 BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT=y
