@@ -10,9 +10,21 @@ on:
 # A from-scratch Buildroot build takes the better part of an hour, so pushes
 # arriving faster than that used to stack up runs that were already superseded
 # -- four were queued at once during bring-up. Only the newest ref matters.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+#
+# Except on trunk. Since the Buildroot patch is applied here (see "Build the
+# system" below) the build also compiles host LLVM, host clang and host-mesa3d,
+# none of which the old 1h33m green builds compiled at all -- plausibly 2.5-3h.
+# Cancelling that on every push means the GPU assertion at the end of the job
+# essentially never runs, which is the same silent-green failure mode in a new
+# costume. Branches and tags keep the old behaviour; trunk builds are allowed
+# to finish and queue behind each other.
+#
+# This is set per job rather than for the whole workflow, and the two groups
+# are named differently on purpose. A workflow-level block would apply the
+# trunk exemption to the cheap checks job as well -- so superseded lint runs
+# would sit in the queue behind a three-hour build, which is the opposite of
+# why that job was split out. Sharing one group name would be worse still:
+# the jobs would cancel each other.
 
 env:
   OTP_VERSION: "29.0.4"
@@ -26,6 +38,11 @@ jobs:
   # they report in a couple of minutes rather than an hour.
   checks:
     runs-on: ubuntu-latest
+    # Always cancel superseded runs: this job is minutes long and only the
+    # newest commit's result is interesting, on trunk as much as anywhere.
+    concurrency:
+      group: ${{ github.workflow }}-checks-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -69,6 +86,11 @@ jobs:
     if: github.ref == 'refs/heads/trunk' || github.ref_type == 'tag'
     needs: [checks]
     runs-on: ubuntu-latest
+    # Let trunk builds finish. See the note at the top of the file: cancelling
+    # these means the GPU assertion at the end never runs.
+    concurrency:
+      group: ${{ github.workflow }}-build-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -97,10 +119,114 @@ jobs:
           mix local.rebar --force
           mix archive.install hex nerves_bootstrap "$NERVES_BOOTSTRAP_VERSION" --force
 
-      - name: Build the system
+      # Buildroot re-downloads every source tarball on a cold runner, and the
+      # upstream mirrors are not reliable: run 31912977472 failed with a 502
+      # from gitlab.freedesktop.org followed by 403s from both dl.nerves-project.org
+      # fallbacks while fetching evtest 1.36, and went green again on the next
+      # push with no repo change in between. A warm ~/.nerves/dl does not fix
+      # that class of failure -- nothing in this repo can -- but it removes
+      # most of the exposure to it. create-build.sh symlinks Buildroot's dl/
+      # here, so this is the whole download cache.
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.nerves/dl
+          key: nerves-dl-${{ runner.os }}-${{ hashFiles('nerves_defconfig', 'mix.lock') }}
+          restore-keys: |
+            nerves-dl-${{ runner.os }}-
+
+      - name: Patch Buildroot and build the system
+        # The patch in the middle is load-bearing, and so is its position.
+        #
+        # patches/buildroot/0001-mesa3d-panfrost-without-target-llvm.patch
+        # patches Buildroot itself, not a package Buildroot builds, so it does
+        # not go through BR2_GLOBAL_PATCH_DIR and nothing applied it here. It
+        # had only ever been applied by hand, locally. Without it, Buildroot
+        # 2026.05.1 has
+        #
+        #     config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST
+        #             depends on BR2_PACKAGE_MESA3D_LLVM
+        #
+        # and Kconfig then *silently discards* BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST
+        # from nerves_defconfig -- no warning, no error, no non-zero exit --
+        # taking GBM and kmscube with it. patches/buildroot/README.md describes
+        # the symptom as a disk blow-up, and that is what happens in the 63 GB
+        # local Docker VM. It is not what happens here: run 31914168299 had
+        # 103 GB free ("/dev/root 145G 42G 103G 29% /"), so instead of dying it
+        # built a swrast-only Mesa, uploaded a 346 MB artifact and reported
+        # success. Every green run since cc1da1e shipped an image with no
+        # panfrost, no GBM and no kmscube.
+        #
+        # Why prime the tree before patching: `mix deps.get` does not create a
+        # Buildroot tree at all. deps/nerves_system_br/create-build.sh does,
+        # and create_buildroot_dir() begins with `rm -fr "$NERVES_SYSTEM"/buildroot*`
+        # before re-extracting. So patching before that runs has nothing to
+        # patch, and patching a tree left over from anything else gets deleted
+        # by the build it was meant to fix. Running create-build.sh ourselves
+        # first extracts the tree and writes buildroot-2026.05.1/.nerves-br-state;
+        # the invocation inside `mix compile` compares that against a freshly
+        # generated expectation (Buildroot version plus sha256 of
+        # nerves_system_br's own patches -- not ours), finds them equal, and
+        # leaves the tree, and our patch, alone.
+        #
+        # patch(1) is the "the patch was applied" assertion -- it exits
+        # non-zero when a hunk rejects, so no separate check is needed for
+        # that. Two flag choices are deliberate:
+        #
+        #   --force        never prompt. A freshly extracted tree cannot be
+        #                  already-patched, so if patch thinks it is, something
+        #                  is wrong. Left to prompt, patch reads the answer
+        #                  from a non-terminal and can silently *reverse* the
+        #                  patch and still exit 0 -- verified with Apple patch
+        #                  2.0-12u11: "Assume -R? [y]" defaults to yes.
+        #   no -N/--forward  those make an already-applied tree a skip. Here it
+        #                  is an anomaly and should be red.
+        #
+        # The reverse dry-run in front only exists to tell the two failure
+        # modes apart: "already applied" versus "upstream context moved".
         run: |
+          br=deps/nerves_system_br/buildroot
+          panfrost_patch=patches/buildroot/0001-mesa3d-panfrost-without-target-llvm.patch
+
           mix deps.get
+          deps/nerves_system_br/create-build.sh nerves_defconfig "$RUNNER_TEMP/br-prime"
+
+          if patch -p1 --dry-run --reverse --force -d "$br" < "$panfrost_patch" >/dev/null 2>&1; then
+            echo "The freshly extracted Buildroot tree already contains the panfrost"
+            echo "patch. That should be impossible -- create-build.sh re-extracts it."
+            exit 1
+          fi
+          patch -p1 --force --no-backup-if-mismatch -d "$br" < "$panfrost_patch"
+
+          rm -rf "$RUNNER_TEMP/br-prime"
           mix compile
+
+      # Assert against the image, not the configuration. The verification plan
+      # records the lesson the hard way: .config said the build was correct
+      # while the artifact was not. See the script for what each check buys.
+      - name: Verify the built image actually contains the GPU stack
+        run: |
+          shopt -s nullglob
+          builds=(.nerves/artifacts/nerves_system_rg40xxv-portable-*/)
+          if [ ${#builds[@]} -ne 1 ]; then
+            echo "expected exactly one Buildroot output directory under" \
+                 ".nerves/artifacts, found ${#builds[@]}"
+            ls -la .nerves/artifacts || true
+            exit 1
+          fi
+          .github/scripts/check-gpu-stack.sh "${builds[0]%/}" build.log
+
+      # build.log is Buildroot's '>>>' progress stream, written by mix compile.
+      # It is the only place the ordering of package builds is visible after
+      # the fact, and it is what the check above greps for host-mesa3d and
+      # kmscube -- keep it whether or not the job passed.
+      - name: Archive the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
 
       - name: Lint the Buildroot defconfig
         # Cheap here because the system is already built; see the note above

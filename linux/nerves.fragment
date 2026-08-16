@@ -71,6 +71,32 @@ CONFIG_BT=m
 CONFIG_BT_HCIUART=m
 CONFIG_BT_HCIUART_3WIRE=y
 CONFIG_BT_HCIUART_RTL=y
+#
+# The generated defconfig carries a "BT_LE is not set" line, at
+# linux/linux-6.18.defconfig:174. It is inherited verbatim from upstream
+# arch/arm64/configs/defconfig (v6.18 line 191) and it does NOT mean Bluetooth
+# Low Energy is compiled out, however much it reads that way. In 6.18 that
+# symbol gates only LE Audio ISO sockets (iso.o), BT_LE_L2CAP_ECRED, BT_6LOWPAN
+# and the selftests. Read out of the 6.18.44 tree this system actually builds,
+# net/bluetooth/Makefile:
+#
+#     15  bluetooth-y := af_bluetooth.o hci_core.o hci_conn.o hci_event.o mgmt.o \
+#     16          hci_sock.o hci_sysfs.o l2cap_core.o l2cap_sock.o smp.o lib.o
+#     23  bluetooth-$(CONFIG_BT_LE) += iso.o
+#
+# hci_sock.o, l2cap_core.o and smp.o are unconditional; only iso.o hangs off
+# BT_LE. So LE advertising and connections are present, and nothing in the
+# application needs this changed.
+#
+# It matters even less for the way this device actually talks to the
+# controller. ScenicRg40xxv.Bluetooth.HCISocket in the application repo binds
+# an AF_BLUETOOTH HCI_CHANNEL_USER socket to hci0, which bypasses the kernel's
+# own Bluetooth stack entirely and speaks raw HCI to the chip. The only kernel
+# code in that path is hci_sock.c plus the hci_h5/btrtl serdev driver above.
+#
+# Left alone on purpose, and left documented so nobody spends a rebuild on it.
+# A comment here changes nothing in the generated defconfig, so it costs no
+# build; adding the symbol would.
 
 # The H700's SID eFuse, read by boardid for the hostname.
 CONFIG_NVMEM_SUNXI_SID=y
