@@ -27,6 +27,32 @@ Confirmed on hardware after the fix:
     Bluetooth: hci0: RTL: cfg_sz 25, total sz 36953
     Bluetooth: hci0: RTL: fw version 0x75b8f098
 
+## The controller answers, and the numbers prove the firmware is running
+
+`ScenicRg40xxv.Diagnostics.probe_bluetooth/0` binds an `HCI_CHANNEL_USER`
+socket to `hci0` and issues Reset then Read Local Version. On this board:
+
+    manufacturer: 93 (0x5D, Realtek)   hci_version: 8   lmp_version: 8
+    hci_revision: 30136 (0x75B8)       lmp_subversion: 61592 (0xF098)
+
+Note that those two revision fields **disagree with what btrtl logged at
+boot**, and that the disagreement is the interesting part.
+
+| Field | btrtl, before upload | probe, after |
+|---|---|---|
+| `hci_revision` | `0x000C` | `0x75B8` |
+| `lmp_subversion` | `0x8821` | `0xF098` |
+
+`0x75B8` concatenated with `0xF098` is `0x75B8F098` — exactly the value btrtl
+printed as `RTL: fw version 0x75b8f098`. So the controller reports its ROM
+identity until it is patched, and its firmware version afterwards.
+
+That makes this the cheapest hard proof available that Bluetooth firmware is
+loaded *and running*, as distinct from having been pushed at the chip once at
+boot. A live probe returning `0x000C` / `0x8821` would mean the upload had
+not taken — the failure this board spent a day on, in a form that
+`/sys/class/bluetooth/hci0` existing would never reveal.
+
 ## "BT_LE is not set" does not disable Bluetooth Low Energy
 
 `linux/linux-6.18.defconfig:174` carries `# CONFIG_BT_LE is not set`,
