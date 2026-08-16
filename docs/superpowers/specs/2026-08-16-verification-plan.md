@@ -11,6 +11,15 @@ and it is the same shape as everything else in the table below: an `hci0`
 exists, so every cheap check says yes, and the controller has in fact been
 dead since the first boot.
 
+Phase 2 has since been done by hand. Battery charge/discharge, the volume
+buttons and headphone detect all pass. Only audibility is left, and it is
+waiting on a decision rather than on evidence.
+
+Two things in this document turned out to be wrong, and both are corrected
+in place rather than deleted: the pass criterion for Bluetooth, and the
+claim that the X and Y buttons needed no translation. A plan whose errors
+are edited out silently teaches nothing the second time.
+
 ## Why this exists
 
 This system's characteristic failure mode is not bad code. It is **inherited
@@ -85,10 +94,10 @@ The static-number failure is ruled out without needing the cable: capacity
 went 83 → 84 between two runs a few minutes apart, and the current moved
 1747000 → 1721000 → 1657000 across three. It is a live gauge, not a constant.
 
-Still outstanding, and it needs a hand: `status` has only ever been observed
-as `Charging`, because the device is powered over the USB gadget. That it
-*changes* to `Discharging` is unverified. This is now a row on the
-diagnostics screen.
+**Cable test: pass, confirmed by hand.** `status` reads `Charging` with the
+cable in, `Discharging` when it is pulled, and `Charging` again when it goes
+back. Both directions, so this is a real supply state and not a boot-time
+constant. Battery is fully verified.
 
 ### 1.2 Thermal
 
@@ -121,6 +130,46 @@ schedulers, sampled before and after:
 
 `cpu-thermal` moving most under a CPU load is the detail that makes these
 real sensors rather than one value copied to four files.
+
+### "Load it with kmscube and re-read" was bad advice
+
+That instruction is struck. Tested by hand: 30 seconds of kmscube left
+`gpu-thermal` at 46 °C, unchanged. Read literally, the plan says that is a
+dead sensor. It is not.
+
+Measured directly instead, using panfrost's per-engine busy counters, which
+need `1` written to `/sys/devices/platform/soc/1800000.gpu/profiling` before
+`fdinfo` reports anything:
+
+| Engine | Busy over 30 s | Utilisation |
+|---|---|---|
+| `drm-engine-fragment` | 1.43 s | **4.74 %** |
+| `drm-engine-vertex-tiler` | 0.15 s | 0.51 % |
+
+`gpu-thermal` moved 45.26 → 45.91 °C across the same window, which is noise.
+
+So a vsync-limited spinning cube at 640×480 is about 5% of a Mali-G31 and
+cannot produce measurable heat. The sensor was already proven by the CPU
+load above; the *test* was wrong. Temperature is a poor proxy for "is the
+GPU working" and the fdinfo counters are a direct answer, so the diagnostics
+screen now shows utilisation and no longer claims the temperature should
+rise.
+
+Worth recording, since this is the second time an expectation written into
+this document has been the thing at fault rather than the hardware.
+
+### Two absences found while looking
+
+Neither is a failure, but both are unknowns that were not on the list:
+
+* `/sys/class/devfreq` is **empty** — the GPU has no frequency scaling. It
+  runs at a fixed clock, so there is no DVFS to observe or tune.
+* `/sys/class/thermal/cooling_device*` is **empty** — there is no thermal
+  throttling bound to any zone. The only trip point on `gpu-thermal` is
+  `critical` at 110 °C, which is a shutdown, not a governor.
+
+At ~5% GPU load and 46 °C this is academic. It stops being academic under
+an emulator, which is the point of the device.
 
 ### 1.3 RTC
 
@@ -222,10 +271,43 @@ two on the device, present for the same reason (they point at
 the observed state, run with the fix, produces
 `rtl8821cs_config.bin -> rtl8761b_config.bin`.
 
-That is strong, and it is still not the device. **Unverified on hardware:**
-this has not been built or flashed. The diagnostics screen shows all three of
-`hci0`, `address` and the config blob, so confirming it after the next flash
-is a glance.
+**Since built, and the prediction held.** The system was rebuilt with the
+`87XX` option and the rootfs contains exactly what the simulation said it
+would:
+
+    rtl8761b_config.bin                    25 bytes, real file
+    rtl8821cs_config.bin -> rtl8761b_config.bin
+
+So the blob the driver called mandatory is now in the image. What remains is
+flashing it and reading `hci0`: an `address` attribute where there was none,
+and no `-2` in `dmesg`. The diagnostics screen shows all three of `hci0`,
+`address` and the config blob, so that is a glance rather than a session.
+
+**Still unconfirmed:** that the controller actually comes up. Shipping the
+file the driver asked for is not the same as the driver being happy with it,
+and this document has already been caught once treating a necessary
+condition as a sufficient one.
+
+### What the rebuild cost, and a Buildroot trap worth keeping
+
+Two things bit, neither related to Bluetooth.
+
+`patches/buildroot/0001-…` **did not apply at all.** Its hunk headers
+disagreed with their bodies — `@@ -205,11 +203,9 @@` over a body of 10 and 8
+lines — so `patch` rejected the whole file. The README's instruction to
+reapply it after `mix deps.get` could never have worked. It has been
+regenerated with `diff -u` and verified against a pristine tree.
+
+Then Mesa built **without GBM**, and kmscube failed with
+`Dependency "gbm" not found`. The cause is worth remembering: the first build
+ran before the patch was fixed, so panfrost was disabled and Mesa was built
+and stamped without GBM. Fixing the patch corrected `.config` —
+`BR2_PACKAGE_MESA3D_GBM=y` was there and verified — but **Buildroot does not
+reconfigure a package that is already stamped built.** Deleting
+`build/mesa3d-26.1.2` and rebuilding fixed it.
+
+Reading `.config` would have said the build was correct. Only the artifact
+said otherwise, which is the same lesson as the rest of this document.
 
 ### A second gap, not yet decided
 
@@ -293,6 +375,11 @@ does exactly that in one step — and refuses unless
 `config :scenic_rg40xxv, audio_test: true`, which is `false`. Nothing plays
 until someone sets it.
 
+**Headphone detect: pass.** Plugging a jack in is detected. So the DT does
+not merely describe the jack, the detect pin is wired and reports. That is
+the half of audio that could be checked without making noise, and it is
+done.
+
 ### 2.2 Volume buttons
 
 `gpio-keys-volume` is on `event1`, separate from the gamepad, and unlike the
@@ -319,14 +406,26 @@ wrong in a way nothing reports.
     button-vol-up     "Key Volume Up"     115   KEY_VOLUMEUP
 
 This time the obvious guess was right — which is only known because it was
-checked. `ScenicRg40xxv.Diagnostics` opens `event1` and counts each
-direction, so the remaining half is pressing both and watching two counters
-move.
+checked.
 
-The gamepad map was re-read at the same time and confirms what
-`ScenicRg40xxv.Launcher` documents: `Action-Pad A` is 305 (`BTN_EAST`) and
-`Action-Pad B` is 304 (`BTN_SOUTH`). X (307) and Y (308) need no such
-translation — the Nintendo layout only disagrees with Linux about A and B.
+**Result: pass.** Both directions register presses.
+
+### X and Y are swapped too, and this document said they were not
+
+The paragraph that stood here claimed X (307) and Y (308) needed no
+translation, because the device tree labels them `Action-Pad X` and
+`Action Pad Y` and Linux has `BTN_X == BTN_NORTH == 307` and
+`BTN_Y == BTN_WEST == 308`. Self-consistent, and wrong.
+
+Pressing them settles it: the button silkscreened **X** emits 308 and the
+one silkscreened **Y** emits 307. The device tree's X/Y labels are the wrong
+way round for this shell — the same trap as A and B, in a document that had
+just finished warning about that exact trap. Reading the device tree is not
+the same as pressing the button.
+
+Confirmed on the gamepad at the same time: `Action-Pad A` is 305
+(`BTN_EAST`) and `Action-Pad B` is 304 (`BTN_SOUTH`), as
+`ScenicRg40xxv.Launcher` documents.
 
 ### 2.3 Charging behaviour under load
 
@@ -407,17 +506,18 @@ reading a config file:
 |---|---|
 | Display, panel variant, GPU, GLES | yes |
 | Gamepad buttons, LEDs, WiFi, USB gadget | yes |
-| Battery gauge is live | **yes** — capacity and current both move |
-| Thermal, all four zones | **yes** — all rise under load, CPU zone most |
+| Battery, including charge/discharge | **yes** — flips both ways on the cable |
+| Thermal, all four zones | **yes** — all rise under CPU load, CPU zone most |
+| GPU does real work | **yes** — 4.74% fragment busy under kmscube, via fdinfo |
 | RTC | **yes** — sane date, and it set the clock at boot |
-| Bluetooth | **no — broken.** Missing firmware blob, fix written, not flashed |
+| Volume buttons | **yes** — both directions register |
+| Headphone jack detect | **yes** — plug detected |
 | Audio codec bound | **yes** — card 0 present, mixer measured muted |
 | Audio audible | no — needs a person, and needs arming |
-| Volume button codes | **yes** — 114 / 115, from the DT |
-| Volume buttons press | no — needs a person |
-| Headphone jack detect | no — needs a jack |
-| Battery discharge | no — needs the cable pulled |
+| Bluetooth | **no — broken.** Fix built and present in the rootfs, not yet flashed |
 | Power-off | route (2) implemented, never pressed |
+| GPU frequency scaling | none — devfreq is empty |
+| Thermal throttling | none — no cooling devices bound |
 | HDMI | unknown, possibly not wired |
 
 ## Putting the rest on the panel
@@ -437,9 +537,16 @@ screen that only had green and red would reproduce that exact mistake.
 The rows waiting on a person are marked with a bullet:
 
     • pull cable      battery status must flip to Discharging
-    • press A         gpu-thermal must rise while kmscube runs
     • press both      volume up and down counters must each move
     • plug/unplug     the jack switch must change
+    • press A         run kmscube, and watch GPU utilisation, not heat
+
+All four have now been done, and all four passed. The screen keeps them
+because they are the checks to repeat after any kernel or device-tree
+change, and because a row that has never been exercised should look
+different from one that has.
+
+Reached with **X**, not Y. The device tree disagrees, the shell is right.
 
 Bluetooth shows `hci0`, `address` and the config blob as three separate rows,
 because the first is exactly the check that lied.
