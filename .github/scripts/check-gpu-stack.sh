@@ -3,10 +3,32 @@
 # Assert that a built system actually contains the GPU stack, by looking at
 # the image rather than at the configuration that asked for it.
 #
-#   $1  Buildroot output directory
-#       (.nerves/artifacts/nerves_system_rg40xxv-portable-<version>)
+#   $1  a Buildroot output directory, or an unpacked Nerves artifact
+#       (.nerves/artifacts/nerves_system_rg40xxv-portable-<version>, or
+#        ~/.nerves/artifacts/... when one was downloaded rather than built)
 #   $2  optional build log to scan for positive build evidence
-#       (Nerves writes ./build.log while `mix compile` runs)
+#       (Nerves writes ./build.log while `mix compile` runs). Absent for a
+#       downloaded artifact, which is not a failure -- see the end of the file.
+#
+# ## Two layouts, one check
+#
+# It takes either shape on purpose. `mix deps.get` downloads a prebuilt
+# artifact whenever one matching the package checksum is published, and then
+# `mix compile` builds nothing -- so on a re-run, or on a tag pointing at an
+# already-released commit, there is no Buildroot tree to look at. CI used to
+# stop there with "found 0 output directories", which is red for a reason that
+# has nothing to do with the GPU.
+#
+# Checking the downloaded artifact instead is not a workaround, it is better:
+# those are the bytes that will actually be flashed. A fresh build proves the
+# tree can produce a good image; the artifact proves the published one *is*
+# a good image.
+#
+# What the two layouts share is staging/, images/ and .config. Only target/
+# and build/ are missing from a packaged artifact, and kmscube ships inside
+# images/rootfs.tar either way -- so the checks below prefer target/ when it
+# exists, because that path is proven, and fall back to staging/ plus the
+# rootfs tarball when it does not.
 #
 # Why this exists, and why it does not trust .config:
 #
@@ -46,12 +68,34 @@ if [ ! -d "$build" ]; then
     exit 2
 fi
 
-target=$build/target
 config=$build/.config
+rootfs=$build/images/rootfs.tar
 
 rc=0
 ok()   { echo "  ok       $1"; }
 fail() { echo "  FAILED   $1"; rc=1; }
+
+# Which tree holds the target libraries. A Buildroot output directory has
+# target/, which is the proven path and stays primary; a packaged artifact
+# does not, and staging/ carries the same shared objects.
+if [ -d "$build/target" ]; then
+    target=$build/target
+    layout=build
+elif [ -d "$build/staging" ]; then
+    target=$build/staging
+    layout=artifact
+else
+    echo "$build has neither target/ nor staging/ -- not a system build or artifact" >&2
+    ls -la "$build" >&2 || true
+    exit 2
+fi
+
+case "$layout" in
+    build)    echo "==> inspecting a Buildroot output tree ($build)" ;;
+    artifact) echo "==> inspecting a packaged artifact ($build)"
+              echo "    No target/ here, so libraries are checked in staging/ and"
+              echo "    kmscube in images/rootfs.tar. These are the bytes that ship." ;;
+esac
 
 # Every path below is a glob, not a pinned filename, because the exact target
 # layout is inferred from Buildroot convention. On a miss, search the whole
@@ -79,7 +123,27 @@ echo "==> the image (what actually shipped)"
 # kmscube is the cheapest single tell: it links GBM, EGL and GLES, so it
 # cannot exist unless all three were built. It is absent from every green run
 # to date.
-check_glob "kmscube is installed" "$target/usr/bin/kmscube" || true
+#
+# Checked in images/rootfs.tar rather than in target/, because that tarball is
+# the filesystem the device boots. target/ is Buildroot's staging area for it,
+# and post-build.sh and the rootfs overlay run between the two -- so a file in
+# target/ has not necessarily shipped. It also happens to be the one place
+# both layouts agree on: a packaged artifact has no target/usr/bin at all.
+if [ -f "$rootfs" ]; then
+    if tar -tf "$rootfs" 2>/dev/null | grep -qE '^\./usr/bin/kmscube$'; then
+        ok "kmscube is in the shipped rootfs (images/rootfs.tar)"
+    else
+        fail "kmscube is not in images/rootfs.tar -- the GPU chain did not build"
+    fi
+else
+    fail "no images/rootfs.tar in $build -- cannot see what shipped"
+fi
+
+# And in target/ as well when there is one, so that "built but excluded from
+# the image" reads differently from "never built".
+if [ "$layout" = build ]; then
+    check_glob "kmscube was staged for the image" "$target/usr/bin/kmscube" || true
+fi
 
 check_glob "libgbm"    "$target/usr/lib/libgbm.so.1*"     || true
 check_glob "libEGL"    "$target/usr/lib/libEGL.so.1*"     || true
@@ -123,12 +187,12 @@ echo "==> Kconfig (secondary: what was asked for, not what shipped)"
 # the failure is in the build or in a stale output directory -- a different
 # problem with a different fix.
 if [ ! -f "$config" ]; then
-    # Nerves links build_path to a downloaded artifact when one matches the
-    # package checksum, and a downloaded artifact has no .config and no
-    # target/ -- so this reads as "nothing was built here", which is a
-    # different situation from "built without the GPU".
-    fail "no .config in $build -- not a Buildroot output tree. Was a prebuilt"
-    fail "artifact downloaded from artifact_sites instead of being built?"
+    # Both layouts carry .config -- a packaged artifact keeps it, which is why
+    # this secondary check still works when nothing was built. So its absence
+    # is not the downloaded-artifact case; it means this directory is neither,
+    # and the checks above were looking at something unexpected.
+    fail "no .config in $build -- neither a Buildroot output tree nor a"
+    fail "packaged artifact. The image checks above may be meaningless."
 else
     for sym in \
         BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST \
@@ -146,8 +210,14 @@ fi
 if [ -n "$buildlog" ]; then
     echo "==> build log (positive evidence, not absence)"
 
-    if [ ! -f "$buildlog" ]; then
-        fail "no build log at $buildlog"
+    if [ ! -f "$buildlog" ] && [ "$layout" = artifact ]; then
+        # Nothing was built, so there is nothing to have logged. Skipping is
+        # correct here; failing would make a correct artifact look broken, and
+        # that confusion is the reason this branch exists at all.
+        echo "  skipped  no build log, and nothing was built -- this is a"
+        echo "           downloaded artifact. The image checks above still ran."
+    elif [ ! -f "$buildlog" ]; then
+        fail "no build log at $buildlog, but this is a build tree -- one was expected"
     else
         # Nerves filters Buildroot's output down to its '>>>' progress lines,
         # which is why the silent deselect was invisible: there is no Kconfig

@@ -32,6 +32,23 @@ env:
   NERVES_BOOTSTRAP_VERSION: "1.17.0"
   KERNEL_VERSION: "6.18.44"
 
+# Read by default; the one job that publishes asks for more. This repository's
+# default workflow permission is "read", which is why every tag build failed at
+# the release step with
+#
+#     Found release v0.2.0 — udev (with id=371435425)
+#     HttpError: Resource not accessible by integration
+#
+# -- action-gh-release found the release and was refused permission to attach
+# assets to it. The identical commit passed on trunk because that step is
+# gated on refs/tags/v and never ran there, which is the whole reason the
+# failure looked like it was about tags.
+#
+# Declared here rather than by flipping the repository setting: this way it is
+# visible in the tree, reviewable, and survives the repo being recreated.
+permissions:
+  contents: read
+
 jobs:
   # Cheap checks that catch the failures which would otherwise only show up
   # after flashing a card. Deliberately separate from the system build so
@@ -86,6 +103,10 @@ jobs:
     if: github.ref == 'refs/heads/trunk' || github.ref_type == 'tag'
     needs: [checks]
     runs-on: ubuntu-latest
+    # The only job that writes anything. Needed by the release step at the
+    # bottom, which attaches the system artifact to the tag's release.
+    permissions:
+      contents: write
     # Let trunk builds finish. See the note at the top of the file: cancelling
     # these means the GPU assertion at the end never runs.
     concurrency:
@@ -205,16 +226,45 @@ jobs:
       # records the lesson the hard way: .config said the build was correct
       # while the artifact was not. See the script for what each check buys.
       - name: Verify the built image actually contains the GPU stack
+        id: system
+        # Look in both places a system can end up, because `mix compile` does
+        # not always build one.
+        #
+        # `mix deps.get` downloads a prebuilt artifact whenever artifact_sites
+        # has one matching the package checksum, and then nothing is built and
+        # .nerves/artifacts never appears. That is not an edge case: it is what
+        # happens on a re-run, and on any tag pointing at a commit that has
+        # already been released. Runs 31969880128 (v0.1.0) and 31970043185 both
+        # failed here with "found 0" for exactly that reason -- red for a cause
+        # with nothing to do with the GPU.
+        #
+        # Checking the downloaded artifact instead is the better answer, not a
+        # concession: those are the bytes that get flashed. A fresh build shows
+        # the tree can produce a good image; the artifact shows the published
+        # one is a good image. The script handles both layouts and says which
+        # it found.
         run: |
           shopt -s nullglob
-          builds=(.nerves/artifacts/nerves_system_rg40xxv-portable-*/)
-          if [ ${#builds[@]} -ne 1 ]; then
-            echo "expected exactly one Buildroot output directory under" \
-                 ".nerves/artifacts, found ${#builds[@]}"
-            ls -la .nerves/artifacts || true
+          built=(.nerves/artifacts/nerves_system_rg40xxv-portable-*/)
+          fetched=("$HOME"/.nerves/artifacts/nerves_system_rg40xxv-portable-*/)
+
+          if [ ${#built[@]} -eq 1 ]; then
+            echo "Built from source this run."
+            echo "source=built" >> "$GITHUB_OUTPUT"
+            .github/scripts/check-gpu-stack.sh "${built[0]%/}" build.log
+          elif [ ${#fetched[@]} -eq 1 ]; then
+            echo "No local build tree: mix deps.get resolved a published artifact"
+            echo "for this checksum, so nothing was compiled. Checking the artifact"
+            echo "that would ship instead."
+            echo "source=fetched" >> "$GITHUB_OUTPUT"
+            .github/scripts/check-gpu-stack.sh "${fetched[0]%/}"
+          else
+            echo "Found no system to check: ${#built[@]} build tree(s) under" \
+                 ".nerves/artifacts and ${#fetched[@]} artifact(s) under" \
+                 "~/.nerves/artifacts. Expected exactly one of either."
+            ls -la .nerves/artifacts "$HOME/.nerves/artifacts" 2>&1 || true
             exit 1
           fi
-          .github/scripts/check-gpu-stack.sh "${builds[0]%/}" build.log
 
       # build.log is Buildroot's '>>>' progress stream, written by mix compile.
       # It is the only place the ordering of package builds is visible after
@@ -237,12 +287,28 @@ jobs:
         # while we legitimately list two, nerves' and ours. The single-argument
         # form of the task does not set a non-zero exit status, so this stays
         # advisory -- do not "fix" it by dropping our patch directory.
+        #
+        # Gated on having built, because the linter needs a real NERVES_SYSTEM
+        # directory and there is no local one otherwise. Nothing is lost: an
+        # artifact only resolves when the checksum matches, nerves_defconfig is
+        # in package_files(), so a fetched run's defconfig is byte-identical to
+        # one this job already linted when that artifact was built.
+        if: steps.system.outputs.source == 'built'
         run: mix nerves.system.lint nerves_defconfig
 
       - name: Archive the built system
+        # Only when this run actually built one.
+        #
+        # If deps.get resolved a published artifact, that artifact is on a
+        # release already -- being downloadable is what proves it -- so there
+        # is nothing here to package and nothing new to publish. Repackaging
+        # a tree that was never built is at best a no-op and at worst a
+        # tarball of nothing, uploaded over a good one.
+        if: steps.system.outputs.source == 'built'
         run: mix nerves.artifact
 
       - uses: actions/upload-artifact@v4
+        if: steps.system.outputs.source == 'built'
         with:
           name: nerves_system_rg40xxv
           path: "*.tar.gz"
@@ -261,7 +327,11 @@ jobs:
       # deps.get looks for a checksum this asset does not have. That is what
       # tags are for here, and why this step only runs on one.
       - name: Publish the artifact to the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        # Both conditions, not just the tag. `mix nerves.artifact` above is
+        # skipped when nothing was built, so there would be no *.tar.gz to
+        # attach -- and an artifact that resolved from artifact_sites is on a
+        # release already, which is how it was downloadable in the first place.
+        if: startsWith(github.ref, 'refs/tags/v') && steps.system.outputs.source == 'built'
         uses: softprops/action-gh-release@v2
         with:
           files: "*.tar.gz"
