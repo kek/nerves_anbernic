@@ -299,17 +299,23 @@ jobs:
         # modes apart: "already applied" versus "upstream context moved".
         run: |
           br=deps/nerves_system_br/buildroot
-          panfrost_patch=patches/buildroot/0001-mesa3d-panfrost-without-target-llvm.patch
 
           mix deps.get
           deps/nerves_system_br/create-build.sh nerves_defconfig "$RUNNER_TEMP/br-prime"
 
-          if patch -p1 --dry-run --reverse --force -d "$br" < "$panfrost_patch" >/dev/null 2>&1; then
-            echo "The freshly extracted Buildroot tree already contains the panfrost"
-            echo "patch. That should be impossible -- create-build.sh re-extracts it."
-            exit 1
-          fi
-          patch -p1 --force --no-backup-if-mismatch -d "$br" < "$panfrost_patch"
+          # Every patch in the directory, in filename order, rather than one
+          # named patch. There are two now and the second was added a month
+          # after the first; a loop cannot be forgotten the way a second
+          # hardcoded variable can.
+          for p in patches/buildroot/*.patch; do
+            echo "==> $p"
+            if patch -p1 --dry-run --reverse --force -d "$br" < "$p" >/dev/null 2>&1; then
+              echo "The freshly extracted Buildroot tree already contains this patch."
+              echo "That should be impossible -- create-build.sh re-extracts it."
+              exit 1
+            fi
+            patch -p1 --force --no-backup-if-mismatch -d "$br" < "$p"
+          done
 
           rm -rf "$RUNNER_TEMP/br-prime"
           mix compile

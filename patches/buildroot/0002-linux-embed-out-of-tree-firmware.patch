@@ -1,0 +1,79 @@
+Allow an out-of-tree firmware directory to be embedded in the kernel
+
+CONFIG_EXTRA_FIRMWARE links a blob into the kernel image so that
+request_firmware() can be satisfied during initcalls, before any filesystem
+is mounted. It reads from CONFIG_EXTRA_FIRMWARE_DIR, which the kernel treats
+as relative to $(srctree) unless it is absolute.
+
+Buildroot already orders the firmware packages before the kernel -- see the
+LINUX_DEPENDENCIES comment about exactly this feature -- but nothing puts an
+out-of-tree blob anywhere the kernel can find it, and a kernel config fragment
+is literal text, so it cannot name $(TARGET_DIR) or any other build-time path.
+An absolute path is not portable between a container build and a CI runner.
+
+So this adds BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR, copied into the kernel
+source tree's firmware/ directory immediately before the build, in the same
+place and the same way the out-of-tree device trees already are.
+
+Needed here because this board's panel is driven by a generic driver that
+reads its timings and init sequence from firmware. As a module that works,
+but the display then cannot appear until userspace has mounted a filesystem
+and modprobed it. Built in with its description embedded, it comes up during
+initcalls instead.
+
+--- a/linux/Config.in
++++ b/linux/Config.in
+@@ -470,6 +470,24 @@
+ 	  BR2_LINUX_KERNEL_CUSTOM_DTS_PATH is now deprecated and
+ 	  replaced by BR2_LINUX_KERNEL_CUSTOM_DTS_DIR
+ 
++config BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR
++	string "Out-of-tree firmware directory to embed"
++	help
++	  Specify a directory that is copied into the kernel source
++	  tree's firmware/ directory before the kernel is built, so that
++	  files inside it can be named by CONFIG_EXTRA_FIRMWARE and
++	  linked into the kernel image.
++
++	  This is for firmware that has to be available before any
++	  filesystem is mounted -- a panel description needed by a
++	  built-in display driver, for example, where request_firmware()
++	  runs during initcalls and there is no initramfs to read from.
++
++	  Buildroot already orders the firmware packages before the
++	  kernel, but nothing puts an out-of-tree blob where
++	  CONFIG_EXTRA_FIRMWARE_DIR can find it, and a kernel config
++	  fragment cannot name a build-time path.
++
+ config BR2_LINUX_KERNEL_CUSTOM_DTS_DIR
+ 	string "Out-of-tree Device Tree Source overlay directories"
+ 	help
+--- a/linux/linux.mk
++++ b/linux/linux.mk
+@@ -535,6 +535,18 @@
+ # '$(LINUX_TARGET_NAME)' targets separately because calling them in
+ # the same $(BR2_MAKE) invocation has shown to cause parallel build
+ # issues.
++LINUX_EXTRA_FIRMWARE_DIR = $(call qstrip,$(BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR))
++ifneq ($(LINUX_EXTRA_FIRMWARE_DIR),)
++# Copied rather than symlinked: the kernel's builtin firmware Makefile reads
++# these through $(srctree), and a dangling or relative symlink out of the
++# build directory does not survive that.
++define LINUX_COPY_EXTRA_FIRMWARE
++	@$(call MESSAGE,"Copying firmware to embed from $(LINUX_EXTRA_FIRMWARE_DIR)")
++	$(Q)mkdir -p $(@D)/firmware
++	$(Q)cp -a $(LINUX_EXTRA_FIRMWARE_DIR)/. $(@D)/firmware/
++endef
++endif
++
+ # The call to disable gcc-plugins is a stop-gap measure:
+ #   https://lore.kernel.org/buildroot/20200512095550.GW12536@scaer
+ define LINUX_BUILD_CMDS
+@@ -543,6 +555,7 @@
+ 		cp -f $(dts) $(LINUX_ARCH_PATH)/boot/dts/
+ 	)
+ 	$(LINUX_COPY_CUSTOM_DTS_FILES)
++	$(LINUX_COPY_EXTRA_FIRMWARE)
+ 	$(LINUX_MAKE_ENV) $(BR2_MAKE) $(LINUX_MAKE_FLAGS) -C $(@D) all
+ 	$(LINUX_MAKE_ENV) $(BR2_MAKE) $(LINUX_MAKE_FLAGS) -C $(@D) $(LINUX_TARGET_NAME)
+ 	$(LINUX_BUILD_DTB)

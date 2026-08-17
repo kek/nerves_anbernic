@@ -61,6 +61,12 @@ BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
 BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="${NERVES_DEFCONFIG_DIR}/linux/linux-6.18.defconfig"
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="${NERVES_DEFCONFIG_DIR}/linux/sun50i-h700-anbernic-rg40xx-v.dts"
+# The panel description, embedded in the kernel image rather than read from
+# the rootfs. See linux/nerves.fragment for why the panel driver is built in,
+# and patches/buildroot/0002 for why Buildroot needs a patch to allow this.
+# Same directory the overlay installs to /lib/firmware, so the blob is not
+# duplicated -- it is simply used twice, once linked in and once on disk.
+BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR="${NERVES_DEFCONFIG_DIR}/rootfs_overlay/lib/firmware"
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_PACKAGE_BUSYBOX_CONFIG="${BR2_EXTERNAL_NERVES_PATH}/board/nerves-common/busybox.config"

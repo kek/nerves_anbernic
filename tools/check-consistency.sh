@@ -172,6 +172,27 @@ else
         || fail "panel '$panel_compat' has no blob at $blob"
 fi
 
+# The blob is also linked into the kernel image, and CONFIG_EXTRA_FIRMWARE
+# names it as a literal string in the fragment. Nothing connects that string
+# to the DTS, so switching panel variants in the device tree without editing
+# the fragment produces a kernel that embeds the wrong description -- and the
+# failure is a dark panel with no error, because the driver is built in and
+# request_firmware() is satisfied by the built-in table with the wrong file.
+if [ -n "$panel_compat" ]; then
+    want="panels/${panel_compat}.panel"
+    grep -q "^CONFIG_EXTRA_FIRMWARE=\"${want}\"$" linux/nerves.fragment \
+        && ok "CONFIG_EXTRA_FIRMWARE embeds ${want}" \
+        || fail "CONFIG_EXTRA_FIRMWARE does not embed ${want} -- the DTS selects
+             '$panel_compat' but the fragment embeds
+             $(grep '^CONFIG_EXTRA_FIRMWARE=' linux/nerves.fragment || echo 'nothing')"
+fi
+
+# The directory the patch copies from must be the one the blob is in, or the
+# kernel build embeds nothing and says so only as a build error.
+grep -q 'BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR="\${NERVES_DEFCONFIG_DIR}/rootfs_overlay/lib/firmware"' nerves_defconfig \
+    && ok "the firmware directory points at rootfs_overlay/lib/firmware" \
+    || fail "BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR does not point at rootfs_overlay/lib/firmware"
+
 # Both variants ship regardless of which one is selected: the wrong one is
 # unusable on the wrong hardware, and a blank screen is a poor way to find
 # that out. Switching variants should be a one-line DTS change and nothing
@@ -190,25 +211,49 @@ for f in rootfs_overlay/boot/extlinux/extlinux-a.conf rootfs_overlay/boot/extlin
         || fail "$(basename "$f") is missing console=tty0"
 done
 
-# The panel driver is loaded explicitly by erlinit, because it can neither be
-# built in (request_firmware runs before the rootfs is mounted) nor autoload
-# (the SPI modalias is derived from the panel's own compatible string, not the
-# driver's). Both were established on hardware. If this line is lost the screen
-# stops working, and the symptom points somewhere else entirely: every other
-# display driver still binds and /sys/class/backlight still appears, but there
-# is no /sys/class/drm/card0.
-if grep -q '^--pre-run-exec .*modprobe panel-mipi' rootfs_overlay/etc/erlinit.config; then
-    ok "erlinit loads the panel driver before starting the BEAM"
+# The display stack is built in and the panel description is embedded.
+#
+# This inverts what these two checks asserted until 2026-08-17, and the old
+# reasoning is kept because it was right about everything except its
+# conclusion. The panel driver was a module loaded by erlinit, because built
+# in it would call request_firmware() during initcalls -- before the rootfs is
+# mounted -- and fail with -2, leaving no /sys/class/drm/card0 at all. That
+# was established on hardware, not guessed.
+#
+# What changed is CONFIG_EXTRA_FIRMWARE, which links the blob into the kernel
+# image so request_firmware() is answered from the built-in table with no
+# filesystem involved. The failure the old comment describes is exactly the one
+# it removes, so "cannot be built in" was really "cannot be built in while the
+# firmware lives on the rootfs".
+#
+# It has to be the whole stack, not just the panel: Kconfig silently demotes a
+# =y symbol whose subsystem is =m, so CONFIG_DRM_PANEL_MIPI=y alone came back
+# out of olddefconfig as =m -- which would have built a module that nothing
+# loads, since this panel cannot autoload (the SPI modalias comes from the
+# panel's own compatible string, not the driver's). A dark screen with no
+# error.
+if grep -q '^CONFIG_DRM_PANEL_MIPI=y' linux/linux-6.18.defconfig; then
+    ok "the panel driver is built in"
 else
-    fail "erlinit.config does not modprobe panel-mipi -- the screen will stay dark"
+    fail "CONFIG_DRM_PANEL_MIPI must be =y, with its blob in CONFIG_EXTRA_FIRMWARE."
+    fail "As a module nothing loads it: it cannot autoload, and erlinit no longer"
+    fail "modprobes it. Check CONFIG_DRM is =y too -- Kconfig demotes it silently."
 fi
 
-# And the module has to exist to be loaded, which means not built in.
-if grep -q '^CONFIG_DRM_PANEL_MIPI=m' linux/linux-6.18.defconfig; then
-    ok "the panel driver is a module, as the firmware load requires"
+if grep -q '^CONFIG_DRM=y' linux/linux-6.18.defconfig; then
+    ok "DRM is built in, so the panel is allowed to be"
 else
-    fail "CONFIG_DRM_PANEL_MIPI must be =m; built in, request_firmware runs"
-    fail "before the rootfs is mounted and the panel never probes"
+    fail "CONFIG_DRM is not =y. Kconfig will demote CONFIG_DRM_PANEL_MIPI=y to =m"
+    fail "without saying so, and the panel will never probe."
+fi
+
+# The modprobe is gone, and its absence is now the invariant: there is no
+# module to load, so the line would only produce a confusing error at boot.
+if grep -q '^--pre-run-exec .*modprobe panel-mipi' rootfs_overlay/etc/erlinit.config; then
+    fail "erlinit still modprobes panel-mipi, but the driver is built in now."
+    fail "There is no module; this only logs an error before the BEAM starts."
+else
+    ok "erlinit does not modprobe the panel, which is built in"
 fi
 
 echo "==> firmware validation"

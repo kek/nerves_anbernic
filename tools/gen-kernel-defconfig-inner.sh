@@ -76,6 +76,15 @@ echo "==> boot-critical driver checklist (from the full .config)"
 # missing hardware the README claims works. Checked against .config rather
 # than the savedefconfig, because savedefconfig omits symbols that already
 # match their Kconfig default.
+#
+# The display symbols are here for exactly that reason and are worth naming.
+# DRM_SUN8I_MIXER and DRM_SUN8I_TCON_TOP do not appear in the committed
+# defconfig at all, because DRM_SUN4I=y implies them and savedefconfig drops
+# what matches a default -- so a regression to =m would be invisible in the
+# file under review while breaking the panel on hardware. The stack has to be
+# built in together: sun4i's component master cannot finish binding until
+# every component has registered, so one modular component holds up the
+# display no matter what the others are.
 required="
   ARCH_SUNXI PINCTRL_SUN50I_H616 PINCTRL_SUN50I_H616_R SUN50I_H616_CCU
   SUNXI_CCU MMC MMC_SUNXI SERIAL_8250 SERIAL_8250_CONSOLE SERIAL_8250_DW
@@ -87,6 +96,7 @@ required="
   NVMEM_SUNXI_SID RTC_DRV_SUN6I PHY_SUN4I_USB
   USB_MUSB_HDRC USB_MUSB_SUNXI USB_GADGET USB_CONFIGFS
   USB_CONFIGFS_ECM USB_CONFIGFS_ACM SND_SUN4I_CODEC
+  DRM DRM_SUN4I DRM_SUN8I_MIXER DRM_SUN8I_TCON_TOP DRM_PANEL_MIPI
 "
 # Present but not fatal. The README describes these as working, so a
 # regression should be visible, but they do not stop a boot.

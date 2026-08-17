@@ -94,33 +94,73 @@ CONFIG_SUN50I_DE2_BUS=y
 # optional.
 CONFIG_SPI_GPIO=y
 # The generic panel driver from patches/linux/0101. It reads this panel's
-# timings and init sequence from /lib/firmware/panels/*.panel at probe time;
-# DRM_PANEL_MIPI depends on BACKLIGHT_CLASS_DEVICE and selects DRM_MIPI_DBI.
+# timings and init sequence from firmware at probe time; DRM_PANEL_MIPI
+# depends on BACKLIGHT_CLASS_DEVICE and selects DRM_MIPI_DBI.
 #
-# This MUST stay a module, and it will NOT autoload. Both halves were
-# established on hardware and are easy to get wrong:
+# Built in, with the panel description linked into the kernel image.
 #
-#   * It cannot be built in. request_firmware() runs at probe, which for a
-#     built-in driver is during initcalls -- before the kernel mounts the root
-#     filesystem in prepare_namespace(). Tried it; the result is
-#     "Direct firmware load for panels/... failed with error -2" at 1.7 s and
-#     no /sys/class/drm/card0 at all. ROCKNIX gets away with building it in
-#     because Batocera ships an initramfs; this system deliberately has none
-#     (CONFIG_BLK_DEV_INITRD is unset, so erlinit is PID 1 out of the squashfs).
+# This was a module until 2026-08-17, and the reason is worth keeping because
+# the obvious fix for it is wrong. request_firmware() runs at probe, which for
+# a built-in driver is during initcalls -- before the kernel mounts the root
+# filesystem in prepare_namespace(). Building it in while the blob sat in
+# /lib/firmware was tried and failed exactly there: "Direct firmware load for
+# panels/... failed with error -2" at 1.7 s and no /sys/class/drm/card0 at all.
+# ROCKNIX gets away with building it in because Batocera ships an initramfs;
+# this system deliberately has none (CONFIG_BLK_DEV_INITRD is unset, so erlinit
+# is PID 1 straight out of the squashfs).
 #
-#   * It cannot autoload. The SPI core derives a device's modalias from the
-#     first compatible string minus its vendor prefix, so this panel announces
-#     itself as "spi:rg40xx-v2-panel" (read it back from
-#     /sys/bus/spi/devices/spi0.0/modalias). The driver only advertises
-#     panel-mipi-dpi-spi, so nothing matches. Reordering the compatible strings
-#     is not an option either -- the driver builds the firmware filename out of
-#     the first one.
+# CONFIG_EXTRA_FIRMWARE is the answer to precisely that failure: it links the
+# blob into the image, so request_firmware() is satisfied from the built-in
+# table with no filesystem involved. The earlier experiment was not "built-in
+# does not work" but "built-in without embedding does not work".
 #
-# So rootfs_overlay/etc/erlinit.config loads it explicitly, after the rootfs is
-# available and before the BEAM starts. The failure this avoids is a nasty one:
-# every other driver binds, /sys/class/backlight appears, and there is still no
-# card0, because sun4i's component master cannot complete without the panel.
-CONFIG_DRM_PANEL_MIPI=m
+# What this buys, measured on hardware before the change:
+#
+#     5.73s  /root mounted
+#     7.10s  the BEAM starts
+#     9.47s  panel-mipi binds
+#     10.27s console switches to the framebuffer
+#
+# As a module the panel could not appear until userspace had mounted a
+# filesystem and modprobed it, which put the first possible pixel about ten
+# seconds in. Built in, probe happens during initcalls.
+#
+# Autoloading is no longer a consideration, but the note is kept because it is
+# the reason this cannot simply go back to being a module that loads itself:
+# the SPI core derives a modalias from the first compatible string minus its
+# vendor prefix, so this panel announces itself as "spi:rg40xx-v2-panel" while
+# the driver advertises panel-mipi-dpi-spi, and nothing matches. Reordering the
+# compatible strings is not an option -- the driver builds the firmware
+# filename out of the first one. Built in, none of that applies: the SPI core
+# matches on of_match_table, which does contain panel-mipi-dpi-spi.
+#
+# The blob is copied into the kernel tree by
+# patches/buildroot/0002-linux-embed-out-of-tree-firmware, from the directory
+# named by BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR in nerves_defconfig -- which is
+# the same rootfs_overlay directory that installs it to /lib/firmware, so there
+# is one copy of the file in the tree and it is used twice.
+#
+# CONFIG_EXTRA_FIRMWARE_DIR is relative, and the kernel prefixes relative paths
+# with $(srctree); "firmware" is the kernel's own default and the directory the
+# patch copies into.
+# The whole sun4i display stack is built in, not just the panel.
+#
+# The arm64 defconfig leaves CONFIG_DRM=m, and Kconfig will not let a symbol be
+# =y when the subsystem it depends on is =m -- it silently downgrades it back
+# to =m instead. Setting only CONFIG_DRM_PANEL_MIPI=y produced exactly that:
+# a generated defconfig still saying =m, which would have built a module that
+# nothing loads, because this panel cannot autoload. A blank screen.
+#
+# The component master is the reason the mixer and the TCON come too: sun4i's
+# display-engine cannot complete binding until every component has registered,
+# so a built-in panel waiting on a modular mixer would gain nothing.
+CONFIG_DRM=y
+CONFIG_DRM_SUN4I=y
+CONFIG_DRM_SUN8I_MIXER=y
+CONFIG_DRM_SUN8I_TCON_TOP=y
+CONFIG_DRM_PANEL_MIPI=y
+CONFIG_EXTRA_FIRMWARE="panels/anbernic,rg40xx-v2-panel.panel"
+CONFIG_EXTRA_FIRMWARE_DIR="firmware"
 CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_GPIO=m
 
