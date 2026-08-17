@@ -18,10 +18,10 @@ Boot chain is SPL → ATF BL31 (`sun50i_h616`) → U-Boot 2026.04 → `sysboot`,
 with A/B rootfs partitions and revert support.
 
 The device boots, joins WiFi, and answers SSH over both WiFi and the USB-C
-cable. Five separate bugs had to be fixed to get there; the README's "What
-bring-up actually found" records them.
+cable. Five separate bugs had to be fixed to get there;
+[`docs/bring-up.md`](docs/bring-up.md) records them.
 
 The 4" LCD is described end to end — patches, device tree and panel firmware —
 but is **not yet confirmed to light up**. HDMI is not described at all. See
-"The display, and what is actually known about it" in the README for what is
-verified and what is not, and for how to read the result.
+[`docs/display.md`](docs/display.md) for what is verified and what is not, and
+for how to read the result.
