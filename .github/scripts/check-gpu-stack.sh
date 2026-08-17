@@ -71,6 +71,11 @@ fi
 config=$build/.config
 rootfs=$build/images/rootfs.tar
 
+# Somewhere to put the tar listing. See the note at the kmscube check for why
+# it is a file and not a pipe.
+listing=$(mktemp)
+trap 'rm -f "$listing"' EXIT
+
 rc=0
 ok()   { echo "  ok       $1"; }
 fail() { echo "  FAILED   $1"; rc=1; }
@@ -124,19 +129,48 @@ echo "==> the image (what actually shipped)"
 # cannot exist unless all three were built. It is absent from every green run
 # to date.
 #
-# Checked in images/rootfs.tar rather than in target/, because that tarball is
-# the filesystem the device boots. target/ is Buildroot's staging area for it,
-# and post-build.sh and the rootfs overlay run between the two -- so a file in
-# target/ has not necessarily shipped. It also happens to be the one place
-# both layouts agree on: a packaged artifact has no target/usr/bin at all.
-if [ -f "$rootfs" ]; then
-    if tar -tf "$rootfs" 2>/dev/null | grep -qE '^\./usr/bin/kmscube$'; then
-        ok "kmscube is in the shipped rootfs (images/rootfs.tar)"
-    else
-        fail "kmscube is not in images/rootfs.tar -- the GPU chain did not build"
-    fi
-else
+# Checked in images/rootfs.tar rather than in target/.
+#
+# What ships is images/rootfs.squashfs, and rootfs.tar is generated from the
+# same post-build staging tree in the same Buildroot step -- so it reflects
+# the same content and can be read without unsquashfs or root. target/ is
+# earlier than both: post-build.sh and the rootfs overlay run between target/
+# and the filesystem images, so a file in target/ has not necessarily shipped.
+# It is also the one place both layouts agree on, since a packaged artifact
+# has no target/ at all.
+#
+# The listing goes to a file rather than down a pipe, and that is not style.
+# `tar -tf "$rootfs" | grep -q PATTERN` under `set -o pipefail` reports the
+# opposite of the truth on Linux, measured in ubuntu:24.04 with GNU tar 1.35:
+#
+#     tar -tf rootfs.tar 2>/dev/null | grep -qE '^\./usr/bin/kmscube$'
+#     PIPESTATUS: tar=141 grep=0        # 141 = 128+13 = SIGPIPE
+#
+# grep -q exits the instant it matches and closes the pipe; tar, still writing
+# the rest of a 2989-entry listing, is killed by SIGPIPE; pipefail promotes
+# that to the pipeline's status. So the `if` takes the else branch on a match
+# that did happen. Swap grep -q for a consumer that drains the listing and tar
+# exits 0, which is the tell.
+#
+# It is deterministic, not flaky -- 5/5 on Linux. It never reproduced on this
+# laptop because neither macOS bsdtar nor Homebrew's GNU tar dies on SIGPIPE
+# here, so the same archive and the same shell gave 5/5 the other way. That
+# asymmetry is what let it reach CI: it was verified against a real artifact
+# before pushing, on the wrong platform. Broke run 32008727891 after a 3h build.
+if [ ! -f "$rootfs" ]; then
     fail "no images/rootfs.tar in $build -- cannot see what shipped"
+elif ! tar -tf "$rootfs" > "$listing" 2>/dev/null; then
+    # Distinct from "kmscube is missing" on purpose: an unreadable archive says
+    # nothing about the GPU, and reporting it as a missing feature is exactly
+    # the conflation this script exists to avoid.
+    fail "could not read $rootfs -- no conclusion about what shipped"
+elif grep -qE '^(\./)?usr/bin/kmscube$' "$listing"; then
+    # Both spellings: Buildroot builds this list with a bare `find` from inside
+    # the staging tree, which yields ./usr/bin/..., but a tar written any other
+    # way would drop the prefix and that should not read as a failure.
+    ok "kmscube is in the rootfs image ($(basename "$rootfs"))"
+else
+    fail "kmscube is not in images/rootfs.tar -- built, but not in the image"
 fi
 
 # And in target/ as well when there is one, so that "built but excluded from
