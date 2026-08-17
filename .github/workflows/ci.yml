@@ -69,6 +69,18 @@ jobs:
       - name: Verify the board device tree
         run: tools/check-dts.sh "$KERNEL_VERSION"
 
+      - name: Test the GPU stack checker itself
+        # The checker runs as the last step of a 3.5 hour job, so a one-line
+        # shell mistake in it costs 3.5 hours to find. That happened twice in
+        # one day -- run 32008727891 built a correct system for 3h24m and then
+        # failed on the checker, and confirming the fix cost another full
+        # build. None of that needed a build: the checker needs a directory of
+        # the right shape, and this makes several in about a second.
+        #
+        # Verified to catch the actual bug: with the pipe reintroduced, this
+        # reports 4 failures including the exact one that broke that run.
+        run: .github/scripts/check-gpu-stack-selftest.sh
+
       - name: Verify the kernel defconfig is in sync with nerves.fragment
         run: |
           tools/gen-kernel-defconfig.sh "$KERNEL_VERSION"
