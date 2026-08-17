@@ -437,6 +437,21 @@ jobs:
       # README.md, REUSE.toml, VERSION -- a comment is enough -- and the next
       # deps.get looks for a checksum this asset does not have. That is what
       # tags are for here, and why this step only runs on one.
+      #
+      # The destination release is NOT the tag that triggered the build. The
+      # `:github_releases` artifact site derives the release it queries from
+      # the project version, so `mix deps.get` only ever looks at `v$VERSION`
+      # -- and the asset filename embeds that same version, not the tag. Tags
+      # v0.2.0 and v0.3.0 each published a perfectly good artifact onto a
+      # release page nothing would ever read, which looks exactly like a
+      # successful publish until an application tries to resolve it.
+      #
+      # So the tag is a build trigger and a label, and the version is the
+      # address. They are allowed to differ; only the address has to be right.
+      - name: Work out which release the resolver reads
+        id: destination
+        run: echo "tag=v$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Publish the artifact to the release
         # Both conditions, not just the tag. `mix nerves.artifact` above is
         # skipped when nothing was built, so there would be no *.tar.gz to
@@ -445,5 +460,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && steps.system.outputs.source == 'built'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.destination.outputs.tag }}
           files: "*.tar.gz"
           fail_on_unmatched_files: true
+          # Assets accumulate on this one release, one per distinct tree, and
+          # that is the intent: the checksum in the filename is what selects
+          # between them, so an older entry stays valid for the tree that
+          # produced it rather than being superseded.
+          make_latest: false
