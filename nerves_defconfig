@@ -12,6 +12,34 @@ BR2_TOOLCHAIN_EXTERNAL_FORTRAN=y
 BR2_TOOLCHAIN_EXTERNAL_OPENMP=y
 BR2_TAR_OPTIONS="--no-same-owner"
 BR2_BACKUP_SITE="https://dl.nerves-project.org"
+
+# Compiler cache. This is aimed at one specific 88 minutes.
+#
+# Measured over run 32008727891, four packages are 68% of a 3h22m build:
+#
+#     linux        48.5 min   host-llvm    46.7 min
+#     host-clang   41.3 min   spirv-tools   7.8 min
+#
+# host-* packages are 60% of the whole build and not one byte of them reaches
+# the device. They are here because panfrost selects
+# BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER, which pulls in host-mesa3d, whose
+# HOST_MESA3D_DEPENDENCIES names host-llvm outright and host-clang through
+# host-libclc. There is no way to drop them and keep the GPU -- checked in
+# package/mesa3d/, not assumed -- so the only lever left is not compiling the
+# same unchanged sources every time.
+#
+# ccache reaches them: Makefile:517 sets HOSTCC = $(CCACHE) $(HOSTCC_NOCCACHE)
+# when this is on, so host packages are cached too, which is the whole point.
+# Caching only target packages would have missed the 88 minutes entirely.
+#
+# Buildroot's warning is worth repeating: it does NOT invalidate the cache
+# when the compiler changes. The external toolchain URL above is part of this
+# file, and CI keys its ccache cache on a hash of this file, so a toolchain
+# bump starts from an empty cache rather than a poisoned one.
+BR2_CCACHE=y
+# The default 5G is more than this needs and CI has a 10 GB budget shared with
+# the Buildroot download cache. LLVM and clang objects compress well.
+BR2_CCACHE_INITIAL_SETUP="--max-size=4G"
 BR2_ENABLE_DEBUG=y
 # Our patches/ is listed after the platform's so that both apply. See
 # patches/linux/ for why the kernel needs one.

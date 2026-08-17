@@ -60,8 +60,62 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-checks-${{ github.ref }}
       cancel-in-progress: true
+    outputs:
+      build_needed: ${{ steps.scope.outputs.build_needed }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Needed by the scope step below, which diffs against the previous
+          # tip. The default depth of 1 has no previous tip to diff against.
+          fetch-depth: 0
+
+      - name: Decide whether the system needs rebuilding
+        id: scope
+        # A push that touches only .github/ cannot change the image. It cannot
+        # even change the artifact checksum -- package_files() covers linux/,
+        # rootfs_overlay/, uboot/, patches/, fwup_include/, busybox/ and a
+        # handful of files at the root, and nothing under .github/. So building
+        # is three and a half hours spent confirming a byte-identical result.
+        #
+        # This was not safe to skip before today. The CI scripts under
+        # .github/scripts/ are the things that assert the image is correct, and
+        # an untested change to them had to be exercised by a real build --
+        # which is exactly how a broken checker survived to fail run
+        # 32008727891 after 3h24m. Now check-gpu-stack.sh has a self-test that
+        # runs in this job in under a second, and catches that specific bug, so
+        # the build is no longer the only thing standing behind those scripts.
+        #
+        # Deliberately conservative: anything it cannot work out safely
+        # -- a tag, a force push, a first push on a branch, a missing or
+        # unreachable base commit -- builds. The failure mode of guessing wrong
+        # in that direction is a slow run; guessing wrong the other way is
+        # shipping an unverified image.
+        run: |
+          needed=true
+          why="not a plain branch push, so building to be safe"
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" != "tag" ]; then
+            before='${{ github.event.before }}'
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              why="no previous tip (new branch or force push), so building to be safe"
+            elif ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              why="previous tip $before is not in this clone, so building to be safe"
+            else
+              changed=$(git diff --name-only "$before" "${{ github.sha }}")
+              echo "changed files:"
+              echo "$changed" | sed 's/^/  /'
+              if echo "$changed" | grep -qv '^\.github/'; then
+                why="something outside .github/ changed"
+              else
+                needed=false
+                why="only .github/ changed, and nothing there is in package_files()"
+              fi
+            fi
+          fi
+
+          echo "build_needed=$needed" >> "$GITHUB_OUTPUT"
+          echo
+          echo "build_needed=$needed -- $why"
 
       - name: Verify the image layout is self-consistent
         run: tools/check-consistency.sh
@@ -110,9 +164,13 @@ jobs:
   # tools/check-consistency.sh in the checks job on every push.
 
   build-system:
-    # Building Buildroot from scratch takes the better part of an hour, so
-    # only do it where the result is worth having.
-    if: github.ref == 'refs/heads/trunk' || github.ref_type == 'tag'
+    # Building Buildroot from scratch takes three and a half hours, so only do
+    # it where the result is worth having: on trunk and on tags, and not when
+    # the push cannot have changed the image. See the scope step in `checks`
+    # for how that last part is decided and why it errs towards building.
+    if: >-
+      (github.ref == 'refs/heads/trunk' || github.ref_type == 'tag') &&
+      needs.checks.outputs.build_needed == 'true'
     needs: [checks]
     runs-on: ubuntu-latest
     # The only job that writes anything. Needed by the release step at the
@@ -167,6 +225,28 @@ jobs:
           key: nerves-dl-${{ runner.os }}-${{ hashFiles('nerves_defconfig', 'mix.lock') }}
           restore-keys: |
             nerves-dl-${{ runner.os }}-
+
+      - name: Cache the compiler cache
+        # Aimed at host-llvm and host-clang: 88 minutes of a 3h22m build,
+        # recompiling identical sources every run. See the note on BR2_CCACHE
+        # in nerves_defconfig for why they cannot simply be dropped.
+        #
+        # The key includes a hash of nerves_defconfig, and that is the safety
+        # interlock rather than mere cache hygiene. Buildroot does not
+        # invalidate ccache when the compiler changes, and the external
+        # toolchain URL lives in that file -- so a toolchain bump changes the
+        # hash and starts from an empty cache instead of a poisoned one.
+        #
+        # github.sha makes every run miss on the exact key and therefore save a
+        # fresh entry, while restore-keys warms it from the most recent run of
+        # the same defconfig. That is the standard ccache-on-Actions shape:
+        # actions/cache only writes when the primary key missed.
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildroot-ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('nerves_defconfig') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ hashFiles('nerves_defconfig') }}-
 
       - name: Patch Buildroot and build the system
         # The patch in the middle is load-bearing, and so is its position.
@@ -282,6 +362,19 @@ jobs:
       # It is the only place the ordering of package builds is visible after
       # the fact, and it is what the check above greps for host-mesa3d and
       # kmscube -- keep it whether or not the job passed.
+      - name: Report the compiler cache hit rate
+        if: always()
+        # Without this, "we added ccache" is a claim rather than a measurement.
+        # A first run on a cold cache is expected to be nearly all misses and
+        # slightly slower than no ccache at all; the run after it is the one
+        # that should show the difference.
+        run: |
+          shopt -s nullglob
+          for cc in .nerves/artifacts/nerves_system_rg40xxv-portable-*/host/bin/ccache; do
+            "$cc" --show-stats 2>/dev/null || "$cc" -s 2>/dev/null || true
+          done
+          du -sh ~/.buildroot-ccache 2>/dev/null || echo "no ccache directory"
+
       - name: Archive the build log
         if: always()
         uses: actions/upload-artifact@v4
