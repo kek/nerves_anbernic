@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+// SPDX-FileCopyrightText: Philippe Simons <lhy31@gmail.com>
+// SPDX-FileCopyrightText: Ryan Walklin <ryan@testtoast.com>
+// SPDX-FileCopyrightText: Chris Morgan <macromorgan@hotmail.com>
+// SPDX-FileCopyrightText: 2026 Karl Eklund
 /*
  * Device tree for the Anbernic RG40XX V (Allwinner H700).
+ *
+ * Derived from the ROCKNIX/Batocera sun50i-h700-anbernic-rg40xx-v.dts by
+ * Philippe Simons, itself extending mainline rg35xx-plus.dts by Ryan Walklin
+ * and Chris Morgan. Dual-licensed as upstream, so this header is authoritative
+ * and REUSE.toml does not annotate this file.
  *
  * The RG40XX V is the same PCB family as the RG35XX Plus, so nearly
  * everything is inherited: the AXP717 PMIC and its regulator tree,

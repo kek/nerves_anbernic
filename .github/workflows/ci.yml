@@ -72,7 +72,7 @@ jobs:
       - name: Decide whether the system needs rebuilding
         id: scope
         # A push that touches only .github/ cannot change the image. It cannot
-        # even change the artifact checksum -- package_files() covers linux/,
+        # even change the artifact checksum -- checksum_files() covers linux/,
         # rootfs_overlay/, uboot/, patches/, fwup_include/, busybox/ and a
         # handful of files at the root, and nothing under .github/. So building
         # is three and a half hours spent confirming a byte-identical result.
@@ -108,7 +108,7 @@ jobs:
                 why="something outside .github/ changed"
               else
                 needed=false
-                why="only .github/ changed, and nothing there is in package_files()"
+                why="only .github/ changed, and nothing there is in checksum_files()"
               fi
             fi
           fi
@@ -119,6 +119,22 @@ jobs:
 
       - name: Verify the image layout is self-consistent
         run: tools/check-consistency.sh
+
+      # REUSE.toml is maintained by hand, and hand-maintained metadata drifts
+      # silently: nothing in a build fails when a licence text is missing or a
+      # new directory is uncovered. An audit found four such drifts at once --
+      # BSD-2-Clause referenced by the board DTS with no text in LICENSES/,
+      # `patches/**` aggregating SPDX tags out of patch payloads, our own
+      # Buildroot patches attributed to kernel contributors, and an unused
+      # licence text.
+      #
+      # It belongs in this job rather than in `mix precommit`, because `reuse`
+      # is a Python tool and not a dependency of this project. Seconds to run,
+      # and it cannot trigger a rebuild.
+      - name: Verify the licensing metadata is complete
+        run: |
+          pipx install reuse
+          reuse lint
 
       - name: Verify the board device tree
         run: tools/check-dts.sh "$KERNEL_VERSION"
@@ -402,7 +418,7 @@ jobs:
         # Gated on having built, because the linter needs a real NERVES_SYSTEM
         # directory and there is no local one otherwise. Nothing is lost: an
         # artifact only resolves when the checksum matches, nerves_defconfig is
-        # in package_files(), so a fetched run's defconfig is byte-identical to
+        # in checksum_files(), so a fetched run's defconfig is byte-identical to
         # one this job already linted when that artifact was built.
         if: steps.system.outputs.source == 'built'
         run: mix nerves.system.lint nerves_defconfig
@@ -431,12 +447,13 @@ jobs:
       # got a 404 and fell back to a multi-hour local Buildroot build.
       #
       # The filename carries the artifact checksum, which Nerves computes from
-      # package_files(). So a release is only useful to the exact tree that
+      # checksum_files(). So a release is only useful to the exact tree that
       # produced it: change anything under linux/, fwup_include/,
       # rootfs_overlay/, uboot/, patches/, or mix.exs, nerves_defconfig,
-      # README.md, REUSE.toml, VERSION -- a comment is enough -- and the next
-      # deps.get looks for a checksum this asset does not have. That is what
-      # tags are for here, and why this step only runs on one.
+      # REUSE.toml, VERSION -- a comment is enough -- and the next deps.get
+      # looks for a checksum this asset does not have. That is what tags are
+      # for here, and why this step only runs on one. README.md and
+      # CHANGELOG.md are deliberately not in that list; see checksum_files().
       #
       # The destination release is NOT the tag that triggered the build. The
       # `:github_releases` artifact site derives the release it queries from

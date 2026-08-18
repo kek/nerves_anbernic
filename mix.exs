@@ -39,9 +39,9 @@ defmodule NervesSystemRG40XXV.MixProject do
   # It deliberately does *not* compile. Compiling this project builds the whole
   # system: `:nerves_package` is in `compilers`, so `mix compile` starts an
   # hour-long Buildroot run in Docker whenever no cached artifact matches the
-  # checksum -- which is the case after any edit to `package_files()`, README
-  # included. A commit-time check that triggers that is unusable, and it fails
-  # for reasons unrelated to the commit.
+  # checksum -- which is the case after any edit to `checksum_files()`. A
+  # commit-time check that triggers that is unusable, and it fails for reasons
+  # unrelated to the commit.
   #
   # These two are what CI's cheap `checks` job runs that needs neither Docker
   # nor network. `tools/check-dts.sh` is left to CI: it is worth running, but it
@@ -136,7 +136,18 @@ defmodule NervesSystemRG40XXV.MixProject do
   defp package do
     [
       files: package_files(),
-      licenses: ["GPL-2.0-only", "GPL-2.0-or-later"],
+      # Every licence present in this repository, which is what Hex renders on the
+      # package page. GPL-2.0-only is the kernel side, GPL-2.0-or-later the
+      # Buildroot and U-Boot side; BSD-2-Clause is the board DTS's other option,
+      # and the two Creative Commons entries are configuration and prose. See
+      # REUSE.toml for which files are which.
+      licenses: [
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "BSD-2-Clause",
+        "CC0-1.0",
+        "CC-BY-4.0"
+      ],
       links: %{"GitHub" => @source_url}
     ]
   end

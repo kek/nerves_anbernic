@@ -12,16 +12,33 @@ path = [
  "mix.exs",
  "mix.lock",
  "VERSION",
- "docs/**",
+ # Only the design specs, which were authored as CC0. The hand-written notes
+ # beside them are prose and are covered by the CC-BY block below.
+ "docs/superpowers/**",
  "tools/**"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "None"
 SPDX-License-Identifier = "CC0-1.0"
 
+# Prose written for this project. The four documents under docs/ were extracted
+# from the README, so they carry the README's licence rather than the CC0 that
+# applied to docs/ when the directory held only design specs -- moving text
+# between files must not relicense it.
+#
+# Enumerated rather than globbed as `docs/*.md`. REUSE's `*` is specified not
+# to cross a `/`, so a glob would be correct -- but the design specs beside
+# these are CC0, and a subtly wrong glob would silently relicense them. Six
+# names cost nothing and cannot be misread.
 [[annotations]]
 path = [
- "README.md"
+ "README.md",
+ "docs/bluetooth-notes.md",
+ "docs/bring-up.md",
+ "docs/debugging.md",
+ "docs/display.md",
+ "docs/hacking.md",
+ "patches/buildroot/README.md"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Karl Eklund"
@@ -61,13 +78,34 @@ SPDX-License-Identifier = "GPL-2.0-only"
 # the display series (0100-0104) is taken from ROCKNIX, which is in turn
 # carrying work by Jernej Skrabec, Philippe Simons, Ryan Walklin, Chris Morgan
 # and kikuchan. Two of them are upstream submissions still in flight.
+#
+# `override` rather than `aggregate`, because a patch body contains the headers
+# of the files it patches. 0101 adds a kernel source file that declares the
+# deprecated `GPL-2.0+`, and aggregating would read that as a statement about
+# the patch -- claiming an identifier that is deprecated and has no text in
+# LICENSES/. What a patch payload says about kernel files is not this
+# repository declaring anything.
 [[annotations]]
 path = [
- "patches/**"
+ "patches/linux/**"
 ]
-precedence = "aggregate"
+precedence = "override"
 SPDX-FileCopyrightText = "Various kernel contributors"
 SPDX-License-Identifier = "GPL-2.0-only"
+
+# Buildroot patches, which are ours rather than inherited: they modify
+# Buildroot's own linux.mk, linux/Config.in and mesa3d.mk. Attributed the same
+# way as the Buildroot-derived files above -- copyright to the Buildroot
+# developers under GPL-2.0-or-later -- so that upstreaming one needs no
+# copyright conversation. They were covered by the kernel block until this was
+# noticed, which was wrong twice over: wrong licence and wrong authors.
+[[annotations]]
+path = [
+ "patches/buildroot/*.patch"
+]
+precedence = "override"
+SPDX-FileCopyrightText = "The Buildroot developers <buildroot@buildroot.org>"
+SPDX-License-Identifier = "GPL-2.0-or-later"
 
 # Panel description blobs, from ROCKNIX's kernel-firmware package. These carry
 # the panel timings and the controller init sequence that the generic
