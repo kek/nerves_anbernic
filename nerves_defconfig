@@ -1,9 +1,31 @@
 BR2_aarch64=y
 BR2_cortex_a53=y
 BR2_TOOLCHAIN_EXTERNAL=y
+# Select the custom toolchain explicitly, or none of the six lines below take
+# effect. Buildroot's toolchain choice is ordered so that the vendor toolchain
+# for the architecture comes first and is therefore the default -- its own
+# comment says "Aarch64 (use ARM toolchain by default)" and, of the custom
+# entry, "Kept last, so it remains the non-default choice". Kconfig does not
+# warn that CUSTOM_PREFIX, CUSTOM_GLIBC, HEADERS_* and URL only exist under
+# CUSTOM; it silently resolves the choice to Arm's toolchain and ignores them.
+#
+# This was missing from the first commit, so every build until now used Arm GNU
+# Toolchain 15.2.Rel1 with glibc 2.42 and the aarch64-none-linux-gnu prefix,
+# while this file said otherwise. Nothing failed: NIFs are compiled with the
+# Nerves toolchain but against this system's sysroot, because
+# nerves-env-helper.sh puts --sysroot in CFLAGS and LDFLAGS, so symbol versions
+# came from the image rather than from the compiler. The app's NIFs need no
+# more than GLIBC_2.17. It was wrong rather than broken.
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
 BR2_TOOLCHAIN_EXTERNAL_DOWNLOAD=y
 BR2_TOOLCHAIN_EXTERNAL_URL="https://github.com/nerves-project/toolchains/releases/download/v15.3.0/nerves_toolchain_aarch64_nerves_linux_gnu-linux_${shell uname -m}-15.3.0-8DAF9F3.tar.xz"
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="aarch64-nerves-linux-gnu"
+# Both read off the toolchain itself rather than assumed: its gcc reports
+# 15.3.0, and its sysroot's linux/version.h says LINUX_VERSION_MAJOR 6,
+# PATCHLEVEL 0. Buildroot offers headers symbols up to 7_0, so declaring 6_0 is
+# a floor and not a guess. BR2_TOOLCHAIN_EXTERNAL_REL_BIN_PATH is deliberately
+# absent: it defaults to "bin", which is right here.
+BR2_TOOLCHAIN_EXTERNAL_GCC_15=y
 BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_0=y
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
 # BR2_TOOLCHAIN_EXTERNAL_INET_RPC is not set

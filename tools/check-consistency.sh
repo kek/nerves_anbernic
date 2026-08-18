@@ -256,6 +256,55 @@ else
     ok "erlinit does not modprobe the panel, which is built in"
 fi
 
+echo "==> external toolchain"
+
+# The failure this catches shipped in the first commit and survived every build
+# since: nerves_defconfig asked for the Nerves toolchain by URL and got Arm's,
+# because BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y was missing.
+#
+# Buildroot's toolchain choice puts the architecture's vendor toolchain first
+# and keeps "custom" last, on purpose, so the choice has a default and it is
+# not ours. CUSTOM_PREFIX, CUSTOM_GLIBC, HEADERS_* and URL exist only under
+# CUSTOM -- without it Kconfig discards them silently and resolves to Arm.
+# There is no warning, the build succeeds, and the image is built by a
+# different compiler against a different libc than this file claims.
+#
+# So assert the implication rather than the symbol: anything that only makes
+# sense under CUSTOM requires CUSTOM.
+DEFCONFIG=nerves_defconfig
+
+custom_only=$(grep -cE '^BR2_TOOLCHAIN_EXTERNAL_(CUSTOM_PREFIX|CUSTOM_GLIBC|CUSTOM_UCLIBC|CUSTOM_MUSL|URL|HEADERS_)' "$DEFCONFIG" || true)
+
+if [ "$custom_only" -gt 0 ]; then
+    if grep -q '^BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y$' "$DEFCONFIG"; then
+        ok "$custom_only custom-toolchain settings are backed by BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y"
+    else
+        fail "$DEFCONFIG sets $custom_only BR2_TOOLCHAIN_EXTERNAL_CUSTOM_* / _URL / _HEADERS_* options"
+        fail "but not BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y, so Kconfig will ignore all of them"
+        fail "and silently build with the architecture's default vendor toolchain."
+    fi
+
+    # CUSTOM also requires the compiler version to be declared; without it the
+    # toolchain is accepted and Buildroot guesses wrong about what it supports.
+    if grep -qE '^BR2_TOOLCHAIN_EXTERNAL_GCC_[0-9]+=y$' "$DEFCONFIG"; then
+        ok "the external toolchain's gcc version is declared"
+    else
+        fail "BR2_TOOLCHAIN_EXTERNAL_CUSTOM needs a BR2_TOOLCHAIN_EXTERNAL_GCC_<n>=y"
+    fi
+
+    # The prefix in the URL and the prefix Buildroot is told to use have to
+    # match, or the toolchain unpacks and no compiler is found under it.
+    url_prefix=$(sed -n 's/^BR2_TOOLCHAIN_EXTERNAL_URL=.*nerves_toolchain_\([a-z0-9_]*\)-.*/\1/p' "$DEFCONFIG")
+    declared=$(sed -n 's/^BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="\(.*\)"$/\1/p' "$DEFCONFIG")
+    if [ -n "$url_prefix" ] && [ -n "$declared" ]; then
+        if [ "$url_prefix" = "$(echo "$declared" | tr - _)" ]; then
+            ok "the toolchain URL and CUSTOM_PREFIX describe the same triple ($declared)"
+        else
+            fail "toolchain URL names '$url_prefix' but CUSTOM_PREFIX is '$declared'"
+        fi
+    fi
+fi
+
 echo "==> firmware validation"
 
 # Revert protection depends on exactly one variable here, nerves_fw_validated,

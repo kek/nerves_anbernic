@@ -380,6 +380,47 @@ jobs:
             exit 1
           fi
 
+      # Assert which compiler actually built the image, not which one the
+      # defconfig asked for. tools/check-consistency.sh already checks the
+      # input -- that BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y backs the CUSTOM_* lines
+      # -- but Kconfig resolving a choice is exactly the step that went wrong
+      # here for every build up to v0.5.0, so the outcome is worth reading off
+      # the built config too. Well-formed input is not the same as a correct
+      # result; that lesson is written all over this repository.
+      #
+      # Both layouts carry .config at their root: a build tree and a downloaded
+      # artifact alike, which is how nerves-env.sh finds a system at all.
+      - name: Verify which toolchain built the image
+        run: |
+          shopt -s nullglob
+          dirs=(.nerves/artifacts/nerves_system_rg40xxv-portable-*/ \
+                "$HOME"/.nerves/artifacts/nerves_system_rg40xxv-portable-*/)
+          if [ ${#dirs[@]} -eq 0 ]; then
+            echo "No system directory found to check."; exit 1
+          fi
+          config="${dirs[0]%/}/.config"
+          if [ ! -f "$config" ]; then
+            echo "No .config in ${dirs[0]}"; exit 1
+          fi
+
+          provides=$(sed -n 's/^BR2_PACKAGE_PROVIDES_TOOLCHAIN_EXTERNAL="\(.*\)"$/\1/p' "$config")
+          prefix=$(sed -n 's/^BR2_TOOLCHAIN_EXTERNAL_PREFIX="\(.*\)"$/\1/p' "$config")
+          echo "toolchain: $provides"
+          echo "prefix:    $prefix"
+
+          if [ "$provides" != "toolchain-external-custom" ]; then
+            echo
+            echo "The image was built by '$provides', not the Nerves toolchain."
+            echo "Buildroot's toolchain choice defaults to the architecture's"
+            echo "vendor toolchain, so this is what a missing"
+            echo "BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y looks like from the far end."
+            exit 1
+          fi
+          case "$prefix" in
+            *-nerves-linux-*) echo "ok: built with the Nerves toolchain" ;;
+            *) echo "Unexpected toolchain prefix '$prefix'."; exit 1 ;;
+          esac
+
       # build.log is Buildroot's '>>>' progress stream, written by mix compile.
       # It is the only place the ordering of package builds is visible after
       # the fact, and it is what the check above greps for host-mesa3d and
