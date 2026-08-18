@@ -89,6 +89,16 @@ BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="${NERVES_DEFCONFIG_DIR}/linux/sun50i-h700-anbe
 # Same directory the overlay installs to /lib/firmware, so the blob is not
 # duplicated -- it is simply used twice, once linked in and once on disk.
 BR2_LINUX_KERNEL_EXTRA_FIRMWARE_DIR="${NERVES_DEFCONFIG_DIR}/rootfs_overlay/lib/firmware"
+# The boot logo: Tux, Erlang, Elixir and Nerves, side by side on black. One
+# strip rather than one image, because fbcon draws n copies of the logo where
+# n*(width+8)-8 <= xres -- so a quad-core board shows four Tuxes, but any image
+# wider than 316 px on this 640-wide panel is drawn exactly once. Buildroot
+# converts the PNG to logo_linux_clut224.ppm (224 colours) at kernel build
+# time and enables CONFIG_LOGO itself; the conversion pulls in
+# host-imagemagick. Provenance and trademark terms for all four marks are in
+# REUSE.toml and docs/boot-logo.md; regenerate the strip with
+# assets/bootlogo/build.sh.
+BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="${NERVES_DEFCONFIG_DIR}/assets/bootlogo/bootlogo.png"
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_PACKAGE_BUSYBOX_CONFIG="${BR2_EXTERNAL_NERVES_PATH}/board/nerves-common/busybox.config"

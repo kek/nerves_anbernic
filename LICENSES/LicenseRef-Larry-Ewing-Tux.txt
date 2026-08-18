@@ -1,0 +1,15 @@
+Tux, the Linux penguin, was created by Larry Ewing <lewing@isc.tamu.edu>
+in 1996 using GIMP, and published at http://www.isc.tamu.edu/~lewing/linux/
+(archived: https://web.archive.org/web/20080521142553/http://www.isc.tamu.edu/~lewing/linux/)
+under the following permission notice:
+
+  "Permission to use and/or modify this image is granted provided you
+   acknowledge me lewing@isc.tamu.edu and The GIMP if someone asks."
+
+The Linux kernel distributes this image (drivers/video/logo/,
+Documentation/images/COPYING-logo) with the statement that it "was
+created by Larry Ewing, and is freely usable as long as you acknowledge
+Larry as the original artist."
+
+This file exists so that the acknowledgment is permanently on record:
+Tux was created by Larry Ewing with GIMP.

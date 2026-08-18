@@ -256,6 +256,30 @@ else
     ok "erlinit does not modprobe the panel, which is built in"
 fi
 
+echo "==> boot logo"
+
+# The logo path in nerves_defconfig is another content-by-path trap: Buildroot
+# dereferences it at kernel build time, so a missing or renamed file fails
+# three hours in, and a strip narrower than 317 px silently comes up as
+# multiple copies (fbcon draws n copies where n*(width+8)-8 <= xres; the
+# panel is 640 wide). The PNG width is bytes 16-19 of the IHDR, so no image
+# tooling is needed to assert it.
+LOGO_REL=$(sed -n 's|^BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="${NERVES_DEFCONFIG_DIR}/\(.*\)"$|\1|p' nerves_defconfig)
+
+if [ -n "$LOGO_REL" ]; then
+    if [ -f "$LOGO_REL" ]; then
+        ok "boot logo exists at $LOGO_REL"
+        width=$(od -An -tu1 -j16 -N4 "$LOGO_REL" | awk 'NF==4 {print ($1*16777216)+($2*65536)+($3*256)+$4; exit}')
+        if [ "${width:-0}" -ge 317 ]; then
+            ok "boot logo is ${width}px wide, so fbcon draws it once (needs >316 on 640)"
+        else
+            fail "boot logo is ${width:-unreadable}px wide; below 317 fbcon draws multiple copies"
+        fi
+    else
+        fail "nerves_defconfig names boot logo $LOGO_REL, which does not exist"
+    fi
+fi
+
 echo "==> external toolchain"
 
 # The failure this catches shipped in the first commit and survived every build

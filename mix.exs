@@ -112,6 +112,7 @@ defmodule NervesSystemRG40XXV.MixProject do
       extras: [
         "README.md",
         "CHANGELOG.md",
+        "docs/boot-logo.md",
         "docs/display.md",
         "docs/bring-up.md",
         "docs/debugging.md",

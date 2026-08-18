@@ -15,6 +15,7 @@ path = [
  # Only the design specs, which were authored as CC0. The hand-written notes
  # beside them are prose and are covered by the CC-BY block below.
  "docs/superpowers/**",
+ "assets/bootlogo/build.sh",
  "tools/**"
 ]
 precedence = "aggregate"
@@ -36,6 +37,7 @@ path = [
  "docs/bluetooth-notes.md",
  "docs/bring-up.md",
  "docs/debugging.md",
+ "docs/boot-logo.md",
  "docs/display.md",
  "docs/hacking.md",
  "patches/buildroot/README.md"
@@ -117,6 +119,65 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "The ROCKNIX contributors"
 SPDX-License-Identifier = "GPL-2.0-only"
+
+# The boot logo strip and its four vendored source marks. Each mark keeps the
+# annotation its own project uses for the identical artwork, so none of these
+# are this repository's invention:
+#
+#  - tux.png is Larry Ewing's 1996 Tux, taken from the kernel's own
+#    drivers/video/logo/logo_linux_clut224.ppm. No SPDX list identifier exists
+#    for his permission notice, so it is vendored as a LicenseRef.
+#  - erlang-logo128.png is copied from erlang/otp lib/wx/priv/, where Ericsson
+#    annotates it Apache-2.0 in a REUSE sidecar. "ERLANG" is a trademark of
+#    Telefonaktiebolaget LM Ericsson (US Reg. 4,558,297); displaying the
+#    unaltered logo as nominative use is OK per Ericsson's guidance in
+#    https://github.com/erlang/otp/issues/3077.
+#  - elixir-drop.png is copied from elixir-lang/elixir's own documentation
+#    (lib/elixir/pages/images/logo.png) -- the exact file whose upstream ORT
+#    curation concludes LicenseRef-elixir-trademark-policy. The policy at
+#    https://elixir-lang.org/trademarks permits using the logo "to say a
+#    technology is 'powered by Elixir' under nominative use".
+#  - nerves-icon.png is from https://nerves-project.org/logos/png.zip; the
+#    policy at https://nerves-project.org/trademarks permits the logo to say
+#    a technology is "powered by Nerves" and to display it as a supported
+#    technology in a hardware device. Annotation mirrors nerves-project/nerves.
+#
+# bootlogo.png is the strip the kernel embeds: the four marks side by side,
+# unaltered, on black. It must never be used as this project's own logo.
+[[annotations]]
+path = ["assets/bootlogo/tux.png"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "1996 Larry Ewing <lewing@isc.tamu.edu> and The GIMP"
+SPDX-License-Identifier = "LicenseRef-Larry-Ewing-Tux"
+
+[[annotations]]
+path = ["assets/bootlogo/erlang-logo128.png"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Ericsson AB 2013. All Rights Reserved."
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["assets/bootlogo/elixir-drop.png"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "The Elixir Team"
+SPDX-License-Identifier = "LicenseRef-elixir-trademark-policy"
+
+[[annotations]]
+path = ["assets/bootlogo/nerves-icon.png"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Nerves Project Authors"
+SPDX-License-Identifier = "LicenseRef-Nerves-Logo"
+
+[[annotations]]
+path = ["assets/bootlogo/bootlogo.png"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = [
+  "1996 Larry Ewing <lewing@isc.tamu.edu> and The GIMP",
+  "Ericsson AB 2013. All Rights Reserved.",
+  "The Elixir Team",
+  "Nerves Project Authors",
+]
+SPDX-License-Identifier = "LicenseRef-Larry-Ewing-Tux AND Apache-2.0 AND LicenseRef-elixir-trademark-policy AND LicenseRef-Nerves-Logo"
 
 # U-Boot derived or related files
 [[annotations]]
