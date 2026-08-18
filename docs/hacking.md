@@ -44,32 +44,50 @@ that nothing loads. Some symbols are also enabled by the arm64 defconfig and
 omitted by `savedefconfig` because they default on — those are checked against
 the full `.config` instead.
 
-## Editing the board DTS does not rebuild the DTB
+## Path-referenced content does not trigger rebuilds
 
 > [!WARNING]
-> **`mix compile` after a DTS edit ships the *previous* DTB.** This has
-> already put a wrong device tree on hardware once.
+> **`mix compile` after editing path-referenced content ships the *previous*
+> bytes under a *fresh* checksum.** This has put a wrong device tree on
+> hardware once and a stale boot logo on hardware once.
 
-`BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` makes Buildroot depend on the *path* of
-`linux/sun50i-h700-anbernic-rg40xx-v.dts`, not its contents — the same shape of
-trap as `uboot/uboot.env`. Editing the DTS does not make the kernel package
-out of date, so `make` copies nothing and `images/*.dtb` keeps its old content.
+Several Buildroot options name a file by path and consume its contents during
+a package's build. Buildroot depends on nothing about these files — not the
+path, not the mtime, not the content — because it deliberately does not track
+configuration changes at all. If the consuming package is already stamped
+`.stamp_built`, the option is silently inert:
+
+- `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` — an edited DTS is not re-copied, and
+  `images/*.dtb` keeps its old content.
+- `BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH` — the logo conversion is a *pre-build
+  hook* of the linux package, so with the kernel stamped built the hook never
+  runs. Observed in practice: the volume's `.config` carried the new option,
+  `host-imagemagick` was even built as the new dependency, and the kernel was
+  repackaged with the stock Tux inside. Only kernel *config* files are
+  genuinely content-tracked by `linux.mk`, which is why a `nerves.fragment`
+  edit does rebuild the kernel while these do not.
+- `uboot/uboot.env` — the original instance of the shape.
 
 It is worse than it sounds, because the artifact checksum *does* change (the
 DTS is under `linux/`, which is in `package_files()`). So the build looks like
 it did the right thing: a new checksum, a new artifact, a new firmware UUID —
 carrying a stale DTB.
 
-There is a second half. Once the DTB is rebuilt in the Docker volume, the
+There is a second half. Once the kernel is rebuilt in the Docker volume, the
 *installed* artifact is still stale, and `mix compile` will not refresh it,
 because the source checksum has not changed since the bad build. Both halves
 have to be broken:
 
 ```bash
-# 1. Force the kernel package to re-copy the DTS and rebuild
-docker run --rm --mount type=volume,src=nerves_system_rg40xxv-<id>,target=/home/nerves/project \
-  ... ghcr.io/nerves-project/nerves_system_br:1.34.1 \
-  bash -c 'make linux-rebuild && make'
+# 1. Force the linux package to rebuild -- its pre-build hooks (logo convert,
+#    DTS copy) run again. Deleting the stamps and letting mix redo the make
+#    is equivalent to `make linux-rebuild` and keeps the environment right:
+docker run --rm --mount type=volume,src=nerves_system_rg40xxv-<id>,target=/v \
+  ghcr.io/nerves-project/nerves_system_br:1.34.1 \
+  rm -f /v/build/linux-*/.stamp_built \
+        /v/build/linux-*/.stamp_target_installed \
+        /v/build/linux-*/.stamp_images_installed \
+        /v/build/linux-*/.stamp_staging_installed
 
 # 2. Force the artifact to be reinstalled from the volume
 rm -rf ~/.nerves/artifacts/nerves_system_rg40xxv-portable-0.1.0
@@ -79,9 +97,21 @@ mix compile
 Then check what actually shipped, rather than trusting the build:
 
 ```bash
+# the DTS trap:
 dtc -I dtb -O dts ~/.nerves/artifacts/nerves_system_rg40xxv-portable-0.1.0/images/*.dtb \
   | grep -o 'anbernic,rg40xx[a-z0-9-]*panel'
+
+# the logo trap -- must print the strip's dimensions, not "80 80". Grep for
+# the dimensions line rather than head -3: ImageMagick preserves the stock
+# file's comment, so the first lines still read "Standard 224-color Linux
+# logo" even when the pixels are the strip's.
+docker run --rm -v nerves_system_rg40xxv-<id>:/v ghcr.io/nerves-project/nerves_system_br:1.34.1 \
+  grep -m1 -E '^[0-9]+ [0-9]+$' /v/build/linux-*/drivers/video/logo/logo_linux_clut224.ppm
 ```
+
+CI never hits any of this: a fresh build has no stamps, so every hook runs.
+The trap exists only for incremental local builds in an existing volume --
+which is exactly the mode used to iterate quickly, so it will be hit again.
 
 `make linux-dirclean` and a full rebuild is the heavier, always-correct
 version.
