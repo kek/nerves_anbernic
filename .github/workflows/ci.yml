@@ -71,19 +71,24 @@ jobs:
 
       - name: Decide whether the system needs rebuilding
         id: scope
-        # A push that touches only .github/ cannot change the image. It cannot
-        # even change the artifact checksum -- checksum_files() covers linux/,
-        # rootfs_overlay/, uboot/, patches/, fwup_include/, busybox/ and a
-        # handful of files at the root, and nothing under .github/. So building
-        # is three and a half hours spent confirming a byte-identical result.
+        # A push that changes nothing in checksum_files() cannot produce a
+        # different artifact, so building is three and a half hours spent
+        # confirming a byte-identical result.
         #
-        # This was not safe to skip before today. The CI scripts under
-        # .github/scripts/ are the things that assert the image is correct, and
-        # an untested change to them had to be exercised by a real build --
-        # which is exactly how a broken checker survived to fail run
-        # 32008727891 after 3h24m. Now check-gpu-stack.sh has a self-test that
-        # runs in this job in under a second, and catches that specific bug, so
-        # the build is no longer the only thing standing behind those scripts.
+        # This used to ask a narrower question -- "did anything outside
+        # .github/ change?" -- which was the same idea applied to one directory
+        # instead of to the real list. It meant a documentation-only push still
+        # cost a full build, which defeated the point of keeping docs/ out of
+        # the checksum in the first place. build-needed.sh asks the actual
+        # question, and reads the list out of mix.exs so there is no second
+        # copy to drift.
+        #
+        # This was not safe to skip at all before the checkers grew self-tests.
+        # The scripts under .github/scripts/ are what assert the image is
+        # correct, and an untested change to one had to be exercised by a real
+        # build -- which is exactly how a broken checker survived to fail run
+        # 32008727891 after 3h24m. They now test themselves in this job in
+        # about a second, so the build is no longer the only thing behind them.
         #
         # Deliberately conservative: anything it cannot work out safely
         # -- a tag, a force push, a first push on a branch, a missing or
@@ -104,11 +109,16 @@ jobs:
               changed=$(git diff --name-only "$before" "${{ github.sha }}")
               echo "changed files:"
               echo "$changed" | sed 's/^/  /'
-              if echo "$changed" | grep -qv '^\.github/'; then
-                why="something outside .github/ changed"
+              echo
+              # The reason goes to stderr, so keep it rather than letting it
+              # scroll past as the only record of why a build was skipped.
+              # A failure of the script itself falls back to building.
+              if ! needed=$(printf '%s\n' "$changed" \
+                   | .github/scripts/build-needed.sh mix.exs 2>/tmp/scope-why); then
+                needed=true
+                why="build-needed.sh failed, so building to be safe"
               else
-                needed=false
-                why="only .github/ changed, and nothing there is in checksum_files()"
+                why=$(cat /tmp/scope-why)
               fi
             fi
           fi
@@ -138,6 +148,13 @@ jobs:
 
       - name: Verify the board device tree
         run: tools/check-dts.sh "$KERNEL_VERSION"
+
+      - name: Test the build-scope checker itself
+        # It decides whether a three-and-a-half-hour build runs, and its
+        # dangerous answer is "false" -- a skipped build is an unverified image,
+        # and the skip looks exactly like a pass. Same reasoning as the GPU
+        # checker's self-test below, same second of runtime.
+        run: .github/scripts/build-needed-selftest.sh
 
       - name: Test the GPU stack checker itself
         # The checker runs as the last step of a 3.5 hour job, so a one-line
