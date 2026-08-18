@@ -85,7 +85,7 @@ defmodule NervesSystemRG40XXV.MixProject do
         {"TARGET_GCC_FLAGS",
          "-mabi=lp64 -fstack-protector-strong -mcpu=cortex-a53 -fPIE -pie -Wl,-z,now -Wl,-z,relro"}
       ],
-      checksum: package_files()
+      checksum: checksum_files()
     ]
   end
 
@@ -141,14 +141,26 @@ defmodule NervesSystemRG40XXV.MixProject do
     ]
   end
 
+  # What ships in the Hex package: everything that goes into the image, plus the
+  # prose that describes it.
   defp package_files do
+    checksum_files() ++ prose_files()
+  end
+
+  # What the artifact checksum is computed from, which is a different question:
+  # not "what belongs in the package" but "what could change the built image".
+  #
+  # Anything listed here invalidates every published artifact when it changes,
+  # so a comment in nerves_defconfig costs three and a half hours -- correctly,
+  # because a comment there is indistinguishable to us from a real edit.
+  # Prose is distinguishable, and it is excluded below.
+  defp checksum_files do
     [
       "busybox",
       "fwup_include",
       "linux",
       "rootfs_overlay",
       "uboot",
-      "CHANGELOG.md",
       "fwup-ops.conf",
       "fwup.conf",
       "LICENSES/*",
@@ -159,9 +171,21 @@ defmodule NervesSystemRG40XXV.MixProject do
       "patches",
       "post-build.sh",
       "post-createfs.sh",
-      "README.md",
       "REUSE.toml",
       "VERSION"
+    ]
+  end
+
+  # Cannot affect a single byte of the image, so editing them must not throw
+  # away a 560 MB artifact and three and a half hours of CI.
+  #
+  # Built by addition rather than by subtracting from the package list, so that
+  # renaming one of these cannot silently put it back into the checksum -- a
+  # `package_files() -- ["README.md"]` would just stop matching and go quiet.
+  defp prose_files do
+    [
+      "CHANGELOG.md",
+      "README.md"
     ]
   end
 
