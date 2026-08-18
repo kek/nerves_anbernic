@@ -1,7 +1,10 @@
 # Release and tag scheme
 
-**Status:** planned. Not to be executed until the display fix (`v0.7.0`) and the
-Nerves-toolchain switch are validated on hardware.
+**Status:** in effect as of 2026-08-18. Both preconditions were met on hardware
+— the panel lights at 2.4 s and the running kernel reports
+`aarch64-nerves-linux-gnu-gcc 15.3.0` — and the migration below was carried out.
+Kept as written, including the parts that turned out differently, because the
+reasoning is the point.
 
 ## What is wrong now
 
@@ -112,6 +115,22 @@ docs-only push currently triggers a three-and-a-half-hour build that cannot
 produce a different artifact. Widening the gate to "nothing in
 `checksum_files()` changed" would make `docs/` genuinely free, which is what
 splitting the checksum list was for in the first place.
+
+## What actually happened
+
+Step 3 removed four releases with assets (`6A79755`, `A58E483`, `D2E00D8`,
+`A0F1E07`), all seven tags from origin and locally, and 4.8 GB of workflow
+artifacts across eleven uploads. The `build-log` artifacts were kept: about
+14 MB, and the only surviving record of those builds.
+
+Three tag builds were cancelled first rather than allowed to publish into the
+middle of it — `v0.5.0` at 4h50m, `v0.6.0` and `v0.7.0`. All three had been
+overtaken by the local build that was flashed and validated, so nothing was
+lost except the chance to see the old publish path work once.
+
+Step 4's window was real but harmless: the flashed system is `A330830D`, which
+lives in `~/.nerves/artifacts` and the Docker build volume, and `~/.nerves/dl`
+still holds 40 cached tarballs.
 
 ## How to tell it worked
 

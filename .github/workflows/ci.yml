@@ -127,6 +127,35 @@ jobs:
           echo
           echo "build_needed=$needed -- $why"
 
+      # One version, one tag, one release, one artifact.
+      #
+      # `mix deps.get` resolves against `v$VERSION`, never against the tag, so
+      # a tag that disagrees with VERSION publishes to a release nothing will
+      # ever query -- green step, asset present, and every application still
+      # falling through to a three-and-a-half-hour build. That happened for
+      # v0.2.0, v0.3.0 and v0.4.0, and was invisible from this end.
+      #
+      # Rather than teach people the difference, this asserts there is none.
+      # It runs in the cheap job so a mismatched tag costs a minute instead of
+      # most of an afternoon, and it is the reason VERSION can be trusted to
+      # mean something again.
+      - name: Verify the tag matches VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(cat VERSION)
+          tag='${{ github.ref_name }}'
+          echo "VERSION: $version"
+          echo "tag:     $tag"
+          if [ "$tag" != "v$version" ]; then
+            echo
+            echo "Tag '$tag' does not match VERSION '$version'."
+            echo "Bump VERSION in the commit you are tagging, so that the tag,"
+            echo "the release deps.get queries, and the artifact filename all"
+            echo "say the same thing. See docs/superpowers/specs/2026-08-18-release-scheme.md"
+            exit 1
+          fi
+          echo "ok: tag and VERSION agree"
+
       - name: Verify the image layout is self-consistent
         run: tools/check-consistency.sh
 
@@ -509,20 +538,18 @@ jobs:
       # produced it: change anything under linux/, fwup_include/,
       # rootfs_overlay/, uboot/, patches/, or mix.exs, nerves_defconfig,
       # REUSE.toml, VERSION -- a comment is enough -- and the next deps.get
-      # looks for a checksum this asset does not have. That is what tags are
-      # for here, and why this step only runs on one. README.md and
-      # CHANGELOG.md are deliberately not in that list; see checksum_files().
+      # looks for a checksum this asset does not have. Publishing is therefore
+      # gated on a tag: a tag is the statement that this exact tree is one
+      # somebody should be able to resolve. README.md and CHANGELOG.md are
+      # deliberately not in that list; see checksum_files().
       #
-      # The destination release is NOT the tag that triggered the build. The
-      # `:github_releases` artifact site derives the release it queries from
-      # the project version, so `mix deps.get` only ever looks at `v$VERSION`
-      # -- and the asset filename embeds that same version, not the tag. Tags
-      # v0.2.0 and v0.3.0 each published a perfectly good artifact onto a
-      # release page nothing would ever read, which looks exactly like a
-      # successful publish until an application tries to resolve it.
-      #
-      # So the tag is a build trigger and a label, and the version is the
-      # address. They are allowed to differ; only the address has to be right.
+      # The destination is derived from VERSION rather than from the tag,
+      # because that is what `mix deps.get` resolves against: the
+      # `:github_releases` artifact site queries `v$VERSION`, and the asset
+      # filename embeds the same version. The checks job has already asserted
+      # that the tag says the same thing, so this is belt and braces -- but it
+      # is the half that has to be right, since a release nothing queries looks
+      # exactly like a successful publish.
       - name: Work out which release the resolver reads
         id: destination
         run: echo "tag=v$(cat VERSION)" >> "$GITHUB_OUTPUT"
@@ -538,8 +565,3 @@ jobs:
           tag_name: ${{ steps.destination.outputs.tag }}
           files: "*.tar.gz"
           fail_on_unmatched_files: true
-          # Assets accumulate on this one release, one per distinct tree, and
-          # that is the intent: the checksum in the filename is what selects
-          # between them, so an older entry stays valid for the tree that
-          # produced it rather than being superseded.
-          make_latest: false
