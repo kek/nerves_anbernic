@@ -37,21 +37,22 @@ printf 'REUSE.toml\n'       | .github/scripts/build-needed.sh mix.exs   # true
 
 `REUSE.toml` *is* in `checksum_files()`, and CI runs `reuse lint`, which needs
 every file in the repository to carry copyright and licence information —
-whether or not it ships. Those two facts collide: adding a new document under
-`docs/` costs nothing, but recording its licence in `REUSE.toml` the way its
-siblings do would throw away every published artifact for one annotation.
+whether or not it ships. Those two facts used to collide: adding a document
+under `docs/` cost nothing, but recording its licence cost a full rebuild for
+one annotation.
 
-So a new doc gets a two-line SPDX header in the file instead, and the
-`REUSE.toml` entry rides along the next time something invalidates the checksum
-anyway. `docs/dram-verification.md` is the current example. This is a wart, not
-a convention worth extending — if several accumulate, move them all in one go
-during a rebuild that was happening regardless.
+`REUSE.toml` now globs `docs/**` as CC-BY-4.0, so **a new document is licensed
+the moment it is created** and no edit here is needed. Add prose freely. The
+glob only became safe once `docs/superpowers/` was deleted: while part of the
+directory was CC0, a glob risked relicensing it silently, which is why the
+documents were enumerated by name before.
 
-Worth being clear about what is and is not required here: nothing about the
-licence is needed for distribution, because `docs/` is in neither the artifact
-nor the published package. It is needed to keep a REUSE compliance claim the
-project chose to make and gates on, and REUSE is all-or-nothing — there is no
-partial pass, so one unlicensed file drops the claim for the whole repository.
+Worth being clear about what is and is not required, since it is easy to
+overestimate. Nothing about the licence is needed for distribution — `docs/` is
+in neither the artifact nor the published package. It is needed to keep a REUSE
+compliance claim the project chose to make and gates on, and REUSE is
+all-or-nothing: there is no partial pass, so one unlicensed file drops the claim
+for the whole repository.
 
 ## Regenerating the kernel configuration
 

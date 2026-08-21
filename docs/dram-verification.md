@@ -1,9 +1,3 @@
-<!--
-SPDX-FileCopyrightText: 2026 Karl Eklund
-SPDX-License-Identifier: CC-BY-4.0
-Here rather than in REUSE.toml, and why: hacking.md, "the licensing corner".
--->
-
 # DRAM type, verified on hardware
 
 **Result: this unit's DRAM is LPDDR3.** Established 2026-08-21 on the device

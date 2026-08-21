@@ -12,9 +12,6 @@ path = [
  "mix.exs",
  "mix.lock",
  "VERSION",
- # Only the design specs, which were authored as CC0. The hand-written notes
- # beside them are prose and are covered by the CC-BY block below.
- "docs/superpowers/**",
  "assets/bootlogo/build.sh",
  "tools/**"
 ]
@@ -22,24 +19,24 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "None"
 SPDX-License-Identifier = "CC0-1.0"
 
-# Prose written for this project. The four documents under docs/ were extracted
-# from the README, so they carry the README's licence rather than the CC0 that
-# applied to docs/ when the directory held only design specs -- moving text
-# between files must not relicense it.
+# Prose written for this project: everything under docs/, plus the two READMEs.
+# These were extracted from the README and carry its licence.
 #
-# Enumerated rather than globbed as `docs/*.md`. REUSE's `*` is specified not
-# to cross a `/`, so a glob would be correct -- but the design specs beside
-# these are CC0, and a subtly wrong glob would silently relicense them. Six
-# names cost nothing and cannot be misread.
+# `docs/**` rather than a list of names. The list existed because docs/ was
+# mixed -- the design specs under docs/superpowers/ were dedicated as CC0, and a
+# subtly wrong glob would have relicensed them silently. Deleting that directory
+# removed the mixture, so there is no longer a wrong answer for a glob to reach.
+#
+# The glob is worth more than the tidiness. This file is inside
+# checksum_files(), so every edit to it throws away every published artifact and
+# costs a full rebuild -- which had already forced one document to carry an
+# in-file SPDX header instead of an entry here. Under `docs/**` a new document
+# is licensed the moment it is created, and adding prose never touches this
+# file again.
 [[annotations]]
 path = [
  "README.md",
- "docs/bluetooth-notes.md",
- "docs/bring-up.md",
- "docs/debugging.md",
- "docs/boot-logo.md",
- "docs/display.md",
- "docs/hacking.md",
+ "docs/**",
  "patches/buildroot/README.md"
 ]
 precedence = "aggregate"
