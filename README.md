@@ -231,7 +231,7 @@ failure it describes produced no error message anywhere.
 | [The boot logo](docs/boot-logo.md) | Why the strip is drawn once, and the researched terms of all four marks |
 | [Debugging without a console](docs/debugging.md) | FEL, card breadcrumbs, and the on-device verification checklist |
 | [Hacking on the system](docs/hacking.md) | Kernel config regeneration, the DTB rebuild trap, the boot chain |
-| [Design notes](docs/superpowers/specs/2026-08-11-nerves-rg40xxv-design.md) | The plan this was built from; the other specs sit beside it, including the [DE33 register decode](docs/superpowers/specs/2026-08-13-de33-register-decode.md) |
+| [DRAM verification](docs/dram-verification.md) | Why this board is LPDDR3, established four ways, and the one open question about the DRAM rail |
 
 ## Licensing and provenance
 

@@ -48,4 +48,5 @@ project's history that did not: `VERSION` stayed at `0.1.0` while the tags ran t
 against the tag, three of them published perfectly good artifacts onto release
 pages nothing would ever read. Those tags and releases have been deleted rather
 than left to mislead. See
-[`docs/superpowers/specs/2026-08-18-release-scheme.md`](docs/superpowers/specs/2026-08-18-release-scheme.md).
+the release-scheme note, since retired -- CI now enforces the rule it
+described, by asserting that a tag matches `VERSION`.

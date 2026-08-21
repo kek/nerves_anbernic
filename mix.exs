@@ -117,15 +117,11 @@ defmodule NervesSystemRG40XXV.MixProject do
         "docs/bring-up.md",
         "docs/debugging.md",
         "docs/hacking.md",
-        "docs/superpowers/specs/2026-08-11-nerves-rg40xxv-design.md",
-        "docs/superpowers/specs/2026-08-12-display-support-plan.md",
-        "docs/superpowers/specs/2026-08-12-display-panel-spec.md",
-        "docs/superpowers/specs/2026-08-13-de33-register-decode.md",
-        "docs/superpowers/specs/2026-08-16-verification-plan.md"
+        "docs/bluetooth-notes.md",
+        "docs/dram-verification.md"
       ],
       groups_for_extras: [
-        Notes: ~r"docs/[^/]+\.md",
-        Design: ~r"docs/superpowers/specs/"
+        Notes: ~r"docs/[^/]+\.md"
       ],
       main: "readme",
       source_ref: "v#{@version}",

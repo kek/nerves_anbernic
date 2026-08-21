@@ -81,7 +81,7 @@ nothing.
 
 Decoding Allwinner's own sun50iw9 BSP is what converted "the screen is green"
 into a one-register boolean; see [the DE33 register
-decode](superpowers/specs/2026-08-13-de33-register-decode.md). Once
+decode in the project journal (`de33-register-map.md`). Once
 `0x1008104` was known to be the frame-end latch, the question became "why does
 this engine never finish a frame" — and an engine wired to a TCON that is not
 driving the panel never will.
@@ -219,8 +219,10 @@ Two traps when reading the log here:
 
 - Both variants report 640×480 @ 60 Hz with identical active area, so **a
   correct mode confirms nothing about the variant.** What differs is the init
-  sequence, the sync polarity (v2 `0x5` = PHSYNC|PVSYNC against v1 `0x0a` =
-  NHSYNC|NVSYNC) and the reset/init delays.
+  sequence (v2 731 bytes against v1 537), the sync polarity (v2 `0x5` =
+  PHSYNC|PVSYNC against v1 `0x0a` = NHSYNC|NVSYNC, which DRM reports as
+  `bus_flags` `0x00000046` and `0x0000000a`) and the reset/init delays (v2
+  5 ms / 20 ms against v1 1 ms / 10 ms).
 - The v1 blob adds a second mode, 640×480 @ 120 Hz, and v2 does not. Two
   modelines in dmesg therefore tells you which **file** loaded — not which
   panel is soldered on.
@@ -236,6 +238,25 @@ GPIO before switching to PWM, so this buys first light for nothing.
 PD28 is the right pin from two directions: muOS's vendor DT for this device
 sets `lcd_pwm_ch = 0` and muxes `pwm0` onto PD28, and PD28 is the only pin in
 6.18.44's H616 pinctrl carrying a `pwm0` function.
+
+## Which ROCKNIX patches this was drawn from
+
+Provenance, kept because it is the trail back to where the display work started
+and the patch numbers are otherwise only findable by reading ROCKNIX's tree:
+
+| Patch | What it was for |
+|---|---|
+| `0003-Update-sun8i_tcon_top.c.patch` | TCON top |
+| `0008-…introduce_allwinner_h616_pwm_controller.patch` | H616 PWM controller — upstream submission in flight |
+| `0010-rg35xx-enable-pwm-backlight.patch` | PWM backlight, not taken; see the backlight section |
+| `0110-…drm_panel_add_generic_mipi_panel_driver.patch` | The generic panel driver — upstream posting v2, 2025-02-26 |
+| `0111-rg35xx-2024-use-panel-mipi-dpi-spi-driver.patch` | Adds the `panel-mipi-dpi-spi` fallback compatible |
+| `0151-phy-fix-OTG-host-mode.patch` | The OTG phy, which turned out to matter for USB rather than display |
+| `0155-sun4i-set-rgb-connector-as-DSI.patch` | sun4i RGB connector treated as DSI |
+
+Deliberately not taken: `0140-rg35xx-2024-use-rocknix-joypad-driver.patch` and
+its friends pull in an out-of-tree joypad driver, and `0127-enable-mmc1-*` is
+ROCKNIX's approach to the WiFi problem this tree solved differently.
 
 ## muOS is the reference, not ROCKNIX
 
@@ -318,7 +339,7 @@ debugging session. Registers owned by a driver can also be read through
 `/sys/kernel/debug/regmap/1100000.mixer-{layers,top,display}`, but the DE clock
 window at `0x1008000` has no regmap, so `devmem` is the only way to see it.
 [The DE33 register
-decode](superpowers/specs/2026-08-13-de33-register-decode.md) lists the
+decode in the project journal (`de33-register-map.md`) lists the
 addresses worth reading, with the values to expect.
 
 `modetest` needs stdin held open or it drops the mode as it exits:

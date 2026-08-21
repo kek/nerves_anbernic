@@ -151,7 +151,7 @@ jobs:
             echo "Tag '$tag' does not match VERSION '$version'."
             echo "Bump VERSION in the commit you are tagging, so that the tag,"
             echo "the release deps.get queries, and the artifact filename all"
-            echo "say the same thing. See docs/superpowers/specs/2026-08-18-release-scheme.md"
+            echo "say the same thing. VERSION is bumped in the commit that gets tagged."
             exit 1
           fi
           echo "ok: tag and VERSION agree"
