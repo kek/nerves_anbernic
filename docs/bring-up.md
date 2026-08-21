@@ -84,10 +84,19 @@ did not hang when this was measured.
 ### The negative control
 
 Two positive measurements still leave a loophole: perhaps the setting is inert.
-Anbernic's specifications say the H700 family is uniformly 1 GB LPDDR4, and the
-reconciliation offered for that is that DRAM init happens in a vendor blob and
+The claim that the H700 family is uniformly 1 GB LPDDR4 circulates widely, and
+the reconciliation offered for it is that DRAM init happens in a vendor blob and
 the Kconfig symbol is never consulted — in which case LPDDR3 and LPDDR4 would
 both appear to work.
+
+That label is secondhand wherever it appears. Anbernic's own product page for
+the RG 40XXV states `RAM: 1GB` and names no type at all; the LPDDR4 attribution
+comes from reviews and the ROCKNIX wiki. And ROCKNIX ships *two* H700 U-Boot
+builds, selecting between them per unit by reading the `vdd-dram` regulator
+rather than by model — having per-model device-tree IDs to hand and choosing a
+measured electrical property instead. So model identity does not predict the
+memory type across this family, and what follows is a fact about **this unit**
+rather than about the model. `docs/dram-verification.md` carries that sourcing.
 
 That is checkable twice over, and both checks close it.
 
@@ -114,8 +123,8 @@ protocol — same 672 MHz clock, same ODT, same drive strengths, same TPR words 
 and they turn a working DRAM init into a hang. A value that is never consulted
 cannot do that.
 
-`lpddr4-upstream` is the direct answer to the specification claim: it is the
-configuration upstream ships for the H700 Anbernic said to be identical
+`lpddr4-upstream` is the direct answer to the LPDDR4 claim: it is the
+configuration upstream ships for the H700 Anbernic usually called identical
 hardware, at the same clock upstream pairs with it, and it does not train this
 memory. Meanwhile LPDDR3 does, and serves two addresses 1 MB apart
 independently. Since the two protocols are mutually unintelligible — different
@@ -123,10 +132,19 @@ CA width, different signalling, different mode-register map, so a PHY set up
 for one cannot train the other at all — that settles the die and not merely the
 configuration.
 
-What none of this reads is the marking on the package. If a specification says
-LPDDR4 for this model, then either this unit is a revision that specification
-does not cover, or the specification is wrong; what is measured here is which
-protocol the memory speaks, which is the question a BSP is asking.
+What none of this reads is the marking on the package. Given that ROCKNIX
+selects per unit rather than per model, the honest scope is this unit: its
+memory speaks LPDDR3, which is the question a BSP is asking. Another RG40XXV
+could in principle differ, and the check to run on one is `tools/dram-type.sh`.
+
+**Open, and more actionable than any of the above:** `CONFIG_AXP_DCDC3_VOLT`
+is 1100, taken verbatim from upstream's *LPDDR4* defconfig along with the rest
+of the PMIC block. ROCKNIX's LPDDR3 build uses 1200, and 1.1 V is the value
+their script reads as meaning LPDDR4. So this may be LPDDR3 memory running at
+the LPDDR4 core voltage — the same inherited-block mistake as the DRAM timings,
+caught on one half and not the other. Undervolted DRAM does not hang; it
+corrupts rarely, under load and heat. Confirm which rail DCDC3 drives on this
+board before changing anything, and soak-test after.
 
 If you ever doubt an inherited hardware parameter, that is the technique: a
 firmware known to boot the hardware is ground truth in a way a sibling

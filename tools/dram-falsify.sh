@@ -8,11 +8,18 @@
 # configured for the types the board is *not*, runs each one, and shows that
 # DRAM does not come up.
 #
-# That matters because the two claims in circulation cannot both be true.
-# Anbernic's own specifications say the H700 family is uniformly 1 GB LPDDR4,
-# and one plausible reconciliation is that our dram type setting is inert --
-# that DRAM init happens in a vendor blob and the Kconfig symbol is never
-# consulted, so LPDDR3 and LPDDR4 would both "work".
+# That matters because a widely repeated claim says the H700 family is uniformly
+# 1 GB LPDDR4, and one plausible reconciliation is that our dram type setting is
+# inert -- that DRAM init happens in a vendor blob and the Kconfig symbol is
+# never consulted, so LPDDR3 and LPDDR4 would both "work".
+#
+# On the label itself: it is secondhand wherever it appears. Anbernic's own
+# product page for the RG 40XXV says "RAM: 1GB" and names no type; the LPDDR4
+# attribution comes from reviews and the ROCKNIX wiki. And ROCKNIX ships two
+# H700 U-Boot builds, choosing between them per unit by reading the vdd-dram
+# regulator rather than by model -- so model identity does not predict the type,
+# and what is established below is a fact about this unit.
+# docs/dram-verification.md has that sourcing in full.
 #
 # Run on 2026-08-21, with the three outcomes written down before the device was
 # touched. The result:
@@ -25,9 +32,9 @@
 # So the symbol is not inert -- the two type-only variants change nothing but
 # the protocol, same clock and ODT and drive strengths and TPR words, and they
 # turn a working init into a hang. A value that is never consulted cannot do
-# that. And the die is not LPDDR4: lpddr4-upstream is the exact configuration
-# upstream ships for the H700 Anbernic the specifications call identical
-# hardware, and it does not train this memory.
+# that. And this die is not LPDDR4: lpddr4-upstream is the exact configuration
+# upstream ships for the H700 Anbernic usually called identical hardware, at the
+# same clock, and it does not train this memory.
 #
 # Why FEL and not firmware
 # ------------------------
