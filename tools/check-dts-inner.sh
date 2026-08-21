@@ -163,10 +163,41 @@ assert_match "audio codec enabled" 'codec@5096000'
 # Note the hyphen in the character class: the volume keys are button-vol-up
 # and button-vol-down.
 buttons=$(grep -cE '^[[:space:]]+button-[a-z0-9-]+ \{' /tmp/board.decompiled.dts || true)
-if [ "$buttons" -ge 17 ]; then
-    echo "  ok       $buttons button nodes (15 gamepad + 2 volume)"
+if [ "$buttons" -ge 18 ]; then
+    echo "  ok       $buttons button nodes (15 gamepad + 2 volume + stick click)"
 else
-    echo "  FAILED   expected at least 17 button nodes, found $buttons"
+    echo "  FAILED   expected at least 18 button nodes, found $buttons"
+    rc=1
+fi
+
+# The stick's click specifically. It is the one button on this board that is
+# not inherited, so a drop here would not move the count below the floor
+# above -- mainline gaining a button would hide it exactly.
+assert_match "stick click present" 'GPIO Thumb Left'
+
+# The analog stick. Four links in a chain, and any one of them missing
+# produces the same symptom: an input device with no ev_abs, which is exactly
+# what this board shipped with before the chain was described. Assert all of
+# them rather than the joystick node alone -- adc-joystick binds last, and
+# the three below it failing leave it silently unbound.
+assert_match "analog stick present" 'adc-joystick'
+assert_match "stick reads through the analog mux" 'io-channel-mux'
+assert_match "mux select lines present" 'gpio-mux'
+assert_match "GPADC enabled" 'allwinner,sun50i-h616-gpadc'
+
+# The mux enable. Without this pinmux nothing switches the mux on, the ADC
+# reads whatever happens to be on the shared line, and the stick looks like
+# it works while reporting the wrong axis.
+assert_match "mux enable pinmux present" 'joy-mux-pin'
+
+# Both axes. One axis node is the shape a copy-paste slip leaves behind, and
+# half a stick is worse than none: centred in one direction, adrift in the
+# other.
+axes=$(grep -cE '^[[:space:]]+axis@[0-9]+ \{' /tmp/board.decompiled.dts || true)
+if [ "$axes" -eq 2 ]; then
+    echo "  ok       $axes joystick axis nodes"
+else
+    echo "  FAILED   expected 2 joystick axis nodes, found $axes"
     rc=1
 fi
 

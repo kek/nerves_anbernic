@@ -75,6 +75,33 @@ CONFIG_BT_HCIUART_RTL=y
 # The H700's SID eFuse, read by boardid for the hostname.
 CONFIG_NVMEM_SUNXI_SID=y
 
+# The analog stick.
+#
+# Four drivers and a chain, because the stick is not wired to anything as
+# direct as its own ADC: it goes through a 4:1 analog multiplexer into the
+# H700's single GPADC channel. The adc-joystick node in
+# linux/sun50i-h700-anbernic-rg40xx-v.dts has the wiring, and which parts of
+# it are measured and which are inferred.
+#
+#   SUN20I_GPADC   the H700's GPADC. The board DTS enables the node; this is
+#                  the driver for its compatible.
+#   MULTIPLEXER    the mux subsystem, with MUX_GPIO for the two select
+#                  lines. MUX_GPIO is =m in the arm64 defconfig.
+#   IIO_MUX        presents the four mux positions as four IIO channels.
+#   JOYSTICK_ADC   turns two of those channels into ABS_X and ABS_Y on an
+#                  input device, which is what evdev consumers read.
+#
+# Built in rather than modules, for the same reason as exFAT and the panel
+# below: this system has no initramfs and nothing modprobes anything, so a
+# module here is a stick that does not exist. It is wanted before the
+# application starts, too, since the launcher opens its input devices at boot.
+CONFIG_SUN20I_GPADC=y
+CONFIG_MULTIPLEXER=y
+CONFIG_MUX_GPIO=y
+CONFIG_IIO_MUX=y
+CONFIG_INPUT_JOYSTICK=y
+CONFIG_JOYSTICK_ADC=y
+
 # Audio. The codec@5096000 node the board DTS enables is
 # "allwinner,sun50i-h616-codec", which sun4i-codec.c drives -- and which the
 # arm64 defconfig does not enable.

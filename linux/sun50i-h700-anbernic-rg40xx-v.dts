@@ -223,6 +223,127 @@
 		gpio = <&pio 4 4 GPIO_ACTIVE_HIGH>; /* PE4 */
 		enable-active-high;
 	};
+
+	/*
+	 * The analog stick.
+	 *
+	 * This board has one, and rg35xx-plus.dts -- which this file extends
+	 * -- describes a board that has none. So the stick was never
+	 * described at all, and Linux reported an RG40XX V with fifteen keys
+	 * and no ev_abs on any input device. That is the whole of why it did
+	 * not work: not a driver failing, an absence.
+	 *
+	 * WIRING. One ADC with a 4:1 analog multiplexer in front of it. PI1
+	 * and PI2 are the select lines, PI0 enables the mux, and the selected
+	 * signal arrives at the H700's GPADC on channel 0. Read out of muOS's
+	 * vendor device tree for this exact device, which spells it
+	 * amux-en-gpios = PI0, A0_gpio = PI1, A1_gpio = PI2 against a gpadc at
+	 * 0x5070000 -- and pin for pin what mainline's rg35xx-h.dts describes
+	 * for the two-stick sibling of this board.
+	 *
+	 * All four mux positions are declared even though one stick occupies
+	 * two of them. Two select lines make four positions whether or not
+	 * anything is soldered to them, and declaring them all puts every one
+	 * in sysfs, which is what makes the next paragraph checkable rather
+	 * than merely asserted.
+	 *
+	 * WHAT IS INFERRED. Which two positions the stick sits on, and which
+	 * way round each axis runs, are taken from the RG35XX H's left stick:
+	 * positions 0 and 1, with X inverted. Shared mux wiring makes that the
+	 * obvious guess and does not make it a measurement. To settle it on
+	 * hardware, move the stick while reading
+	 *
+	 *     /sys/bus/iio/devices/iio:device0/in_voltage[0-3]_raw
+	 *
+	 * The two that move are the stick; which way each one travels gives
+	 * the polarity, and the extremes give the real range in place of the
+	 * nominal 0..4096 below.
+	 *
+	 * NOT ADDED: the stick click. The sibling board puts BTN_THUMBL on
+	 * PE8 and muOS's vendor tree calls that same pin "Key L3", so the line
+	 * is very likely there -- but nobody has pressed this stick down and
+	 * watched, and a gpio-keys entry for a switch that is not fitted is an
+	 * input that chatters rather than one that stays quiet.
+	 */
+	adc-joystick {
+		compatible = "adc-joystick";
+		io-channels = <&adc_mux 0>, <&adc_mux 1>;
+		pinctrl-0 = <&joy_mux_pin>;
+		pinctrl-names = "default";
+		poll-interval = <60>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		axis@0 {
+			reg = <0>;
+			abs-flat = <32>;
+			abs-fuzz = <32>;
+			abs-range = <4096 0>;
+			linux,code = <ABS_X>;
+		};
+
+		axis@1 {
+			reg = <1>;
+			abs-flat = <32>;
+			abs-fuzz = <32>;
+			abs-range = <0 4096>;
+			linux,code = <ABS_Y>;
+		};
+	};
+
+	adc_mux: adc-mux {
+		compatible = "io-channel-mux";
+		channels = "stick_x", "stick_y", "spare_2", "spare_3";
+		#io-channel-cells = <1>;
+		io-channels = <&gpadc 0>;
+		io-channel-names = "parent";
+		mux-controls = <&gpio_mux>;
+		settle-time-us = <100>;
+	};
+
+	gpio_mux: mux-controller {
+		compatible = "gpio-mux";
+		mux-gpios = <&pio 8 1 GPIO_ACTIVE_LOW>, /* PI1 */
+			    <&pio 8 2 GPIO_ACTIVE_LOW>; /* PI2 */
+		#mux-control-cells = <0>;
+	};
+};
+
+/*
+ * The stick's click, on PE8.
+ *
+ * Confirmed by pressing it: the stick on this board is a button as well as
+ * an axis pair. The pin is the one mainline's rg35xx-h.dts gives BTN_THUMBL
+ * on the two-stick sibling, and the one muOS's vendor tree for this device
+ * labels "Key L3".
+ *
+ * Only the left one. That board describes a BTN_THUMBR on PE9 as well, and
+ * this shell has no second stick to click -- a gpio-keys entry for a switch
+ * that is not fitted is an input that chatters rather than one that stays
+ * quiet.
+ */
+&gpio_keys_gamepad {
+	button-thumbl {
+		label = "GPIO Thumb Left";
+		gpios = <&pio 4 8 GPIO_ACTIVE_LOW>; /* PE8 */
+		linux,input-type = <EV_KEY>;
+		linux,code = <BTN_THUMBL>;
+	};
+};
+
+/*
+ * The ADC the multiplexer feeds into. Disabled in sun50i-h616.dtsi, the way
+ * SoC-level nodes are, and enabled here with the one channel this board
+ * physically brings out.
+ */
+&gpadc {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	channel@0 {
+		reg = <0>;
+	};
 };
 
 /*
@@ -506,6 +627,17 @@
 		       "PD20", "PD21", "PD22", "PD23",
 		       "PD24", "PD25", "PD26", "PD27";
 		function = "lcd0";
+	};
+
+	/*
+	 * The analog multiplexer's enable, driven low by being configured as
+	 * an output. Referenced by the adc-joystick node rather than by the
+	 * mux, which is where mainline's rg35xx-h.dts puts it too: the mux
+	 * consumer is what needs the signal path alive.
+	 */
+	joy_mux_pin: joy-mux-pin {
+		pins = "PI0";
+		function = "gpio_out";
 	};
 };
 
