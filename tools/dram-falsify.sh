@@ -57,6 +57,10 @@
 # A variant whose SPL hangs takes the device off USB, which is the expected
 # result for a wrong type and is reported as such rather than as an error.
 #
+# One arm is not about the type at all: `lpddr3-vdd1v2` raises the DRAM rail
+# from the inherited 1100 mV to LPDDR3's nominal 1200 and asks only whether
+# training still succeeds. See CONFIG_AXP_DCDC3_VOLT in uboot/uboot.defconfig.
+#
 #   tools/dram-falsify.sh build     build the SPL variants (needs Docker)
 #   tools/dram-falsify.sh test <n>  FEL-test one variant by name
 #   tools/dram-falsify.sh matrix    walk every variant, prompting between
@@ -79,7 +83,7 @@ UBOOT_TARBALL=${UBOOT_TARBALL:-$HOME/.nerves/dl/uboot/u-boot-2026.04.tar.bz2}
 # consulted at all. The upstream one is the whole DRAM block from
 # configs/anbernic_rg35xx_h700_defconfig, i.e. the configuration that should
 # work if the family specification is right about this unit.
-VARIANTS="lpddr3 lpddr4-upstream lpddr4-typeonly ddr3-typeonly"
+VARIANTS="lpddr3 lpddr4-upstream lpddr4-typeonly ddr3-typeonly lpddr3-vdd1v2"
 
 expected() { # expected <variant>
     case "$1" in
@@ -87,6 +91,7 @@ expected() { # expected <variant>
         lpddr4-upstream) echo "no DRAM, if this board is not LPDDR4" ;;
         lpddr4-typeonly) echo "no DRAM, and if it does come up the symbol is inert" ;;
         ddr3-typeonly)   echo "no DRAM, and if it does come up the symbol is inert" ;;
+        lpddr3-vdd1v2)   echo "DRAM trains -- this one is a question, not a control" ;;
     esac
 }
 
@@ -100,6 +105,13 @@ recorded() { # recorded <variant>
         lpddr4-upstream) echo "hung" ;;
         lpddr4-typeonly) echo "hung" ;;
         ddr3-typeonly)   echo "hung" ;;
+        # The open vdd-dram question rather than a settled result. Our SPL
+        # programs 1100 mV, inherited from an LPDDR4 defconfig; ROCKNIX's
+        # LPDDR3 build uses 1200, which is LPDDR3's nominal VDD2. In FEL there
+        # is no kernel to drag the rail back afterwards, so this arm is a valid
+        # training check on its own -- and it is the cheap first step of the
+        # sequence in docs/dram-verification.md, before any rebuild.
+        lpddr3-vdd1v2)   echo "unrun" ;;
     esac
 }
 
@@ -110,6 +122,7 @@ describe_outcome() { # describe_outcome <outcome>
         alias)   echo "DRAM answers but aliases" ;;
         no-rt)   echo "DRAM did not round-trip" ;;
         no-fel)  echo "no device in FEL mode" ;;
+        unrun)   echo "never run -- this arm is a question, not a control" ;;
         *)       echo "$1" ;;
     esac
 }
@@ -119,6 +132,11 @@ describe_outcome() { # describe_outcome <outcome>
 # unexamined work.
 compare() { # compare <variant> <outcome>
     local want; want=$(recorded "$1")
+    if [ "$want" = "unrun" ]; then
+        note "no recorded outcome for $1 -- this run is the experiment"
+        note "if it trained, the DTS override and the defconfig line land together"
+        return
+    fi
     if [ "$2" = "$want" ]; then
         note "matches the outcome recorded on 2026-08-21 ($want)"
     else
@@ -175,6 +193,8 @@ for v in $VARIANTS; do
       lpddr3)          cp "$BASE" "$O/.config" ;;
       lpddr4-typeonly) sed 's/^CONFIG_SUNXI_DRAM_H616_LPDDR3=y$/CONFIG_SUNXI_DRAM_H616_LPDDR4=y/' "$BASE" > "$O/.config" ;;
       ddr3-typeonly)   sed 's/^CONFIG_SUNXI_DRAM_H616_LPDDR3=y$/CONFIG_SUNXI_DRAM_H616_DDR3_1333=y/' "$BASE" > "$O/.config" ;;
+      # Only the DRAM rail differs from the control: same type, same timings.
+      lpddr3-vdd1v2)   sed 's/^CONFIG_AXP_DCDC3_VOLT=1100$/CONFIG_AXP_DCDC3_VOLT=1200/' "$BASE" > "$O/.config" ;;
       lpddr4-upstream)
           grep -vE '^CONFIG_(DRAM_CLK|DRAM_SUNXI_(DX_ODT|DX_DRI|CA_DRI|ODT_EN|TPR2|TPR6|TPR10|TPR11|TPR12|PHY_ADDR_MAP_1)|SUNXI_DRAM_H616_LPDDR3)=' "$BASE" > "$O/.config"
           cat >> "$O/.config" <<'UP'

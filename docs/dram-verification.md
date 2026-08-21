@@ -301,10 +301,20 @@ linux package silently ships the previous bytes under a fresh checksum.
 
 **Verification sequence:**
 
-1. *FEL training check (cheap, nothing flashed):* load the new SPL with
-   the kit in `~/src/rg40xxv-fel-test/` and confirm the 1 MiB pattern
-   readback at 1.2 V. Same A-B bracketing as before, with the current
-   1.1 V SPL as the known-good arm.
+1. *FEL training check (cheap, nothing flashed, and no rebuild):* this is now
+   one command —
+
+   ```
+   tools/dram-falsify.sh test lpddr3-vdd1v2
+   ```
+
+   That arm is the control with `CONFIG_AXP_DCDC3_VOLT` raised to 1200 and
+   nothing else touched; the built SPLs differ by seven bytes, one constant and
+   the eGON checksum. It is a valid test on its own because in FEL there is no
+   kernel to drag the rail back afterwards. Bracket it with `test lpddr3` as
+   the known-good arm, or use the kit in `~/src/rg40xxv-fel-test/` for the
+   1 MiB pattern readback. **Do this before spending the rebuild** — if 1.2 V
+   does not train, the other two edits are moot.
 2. *Rail confirmation:* burn and boot, then read
    `/sys/class/regulator/*/microvolts` for `vdd-dram` — it should now say
    1200000, and for the first time the reading is meaningful rather than

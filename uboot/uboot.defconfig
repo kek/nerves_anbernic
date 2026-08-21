@@ -7,6 +7,12 @@
 # Nerves needs: an environment block on the MicroSD that both U-Boot and
 # Elixir can read, and sysboot/squashfs so U-Boot can read
 # extlinux-{a,b}.conf straight out of the active rootfs partition.
+#
+# "Taken verbatim from upstream" is the sentence that already cost this project
+# a week, so read it as a warning rather than a provenance note. The file it was
+# copied from is an *LPDDR4* defconfig. The DRAM half of that copy was caught
+# and replaced; the PMIC half was not reconsidered, and one value in it is
+# memory-type-dependent -- see the note on CONFIG_AXP_DCDC3_VOLT below.
 
 CONFIG_ARM=y
 CONFIG_ARCH_SUNXI=y
@@ -19,13 +25,24 @@ CONFIG_DEFAULT_DEVICE_TREE="allwinner/sun50i-h700-anbernic-rg35xx-2024"
 # These are NOT upstream's values. anbernic_rg35xx_h700_defconfig specifies
 # CONFIG_SUNXI_DRAM_H616_LPDDR4, and using it here hangs the SPL during DRAM
 # init: the SoC stops responding entirely, so it never returns control even to
-# a FEL session. The RG40XXV has LPDDR3, not LPDDR4 -- the one place the "same
-# PCB family as the RG35XX Plus" assumption breaks down.
+# a FEL session. This is the one place the "same PCB family as the RG35XX Plus"
+# assumption breaks down.
 #
-# Source: the vendor boot0 on a muOS card that boots this device. Its
-# dram_para (at offset 0x38) declares dram_type = 7 (LPDDR3) and carries the
-# drive-strength and ODT values below, while agreeing with upstream on the
-# 672 MHz clock -- which is what confirms the struct offset is right.
+# **This unit** has LPDDR3 -- not the model, and not the family. ROCKNIX ships
+# both an LPDDR3 and an LPDDR4 U-Boot for the H700 and chooses between them per
+# unit by reading the vdd-dram regulator, having per-model device-tree IDs
+# available and unused. So model identity does not predict the memory type, and
+# a second RG40XXV is not covered by anything below. No published Anbernic
+# specification names a type at all; the LPDDR4 label that circulates is
+# secondhand.
+#
+# Established four ways, all reproducible: see docs/dram-verification.md, and
+# tools/dram-type.sh for the two cheap ones. Source of the values here is the
+# vendor boot0 on a muOS card that boots this device -- its dram_para at offset
+# 0x38 declares dram_type = 7 (LPDDR3) and carries the drive-strength and ODT
+# values below. Two things confirm the struct offset rather than assuming it:
+# the 672 MHz clock agrees with upstream, and the eGON checksum over the blob
+# verifies, which it cannot do unless the header layout is the documented one.
 #
 # TPR6 and TPR10 have no default in U-Boot's Kconfig, so they are mandatory --
 # omitting them makes Kconfig prompt for a value and the build hangs. The TPR
@@ -69,6 +86,23 @@ CONFIG_SYS_I2C_SPEED=400000
 CONFIG_REGULATOR_AXP=y
 CONFIG_AXP717_POWER=y
 CONFIG_AXP_DCDC2_VOLT=940
+
+# DCDC3 is vdd-dram, and 1100 is inherited from an LPDDR4 defconfig. **Open
+# question, not a settled value.** ROCKNIX's LPDDR3 build programs 1200 into
+# this same PMIC on these same boards, 1.2 V being LPDDR3's nominal VDD2, and
+# ROCKNIX reads 1.1 V here as *meaning* LPDDR4. So this may be LPDDR3 memory
+# running 100 mV under nominal -- the same inherited-block mistake as the
+# timings, caught on the DRAM half and missed on this one.
+#
+# Not changed yet, deliberately, and it must not be changed here alone. The
+# board device tree pins vdd-dram at min == max == 1100000 with
+# regulator-always-on, so raising only this value would train DRAM at 1.2 V and
+# then let the kernel drag the rail back to 1.1 V at regulator registration --
+# worse than either steady state. The DTS override and this line have to land
+# together, after a FEL training check, and the whole sequence is written up
+# under "The 1.2 V experiment" in docs/dram-verification.md.
+#
+# Undervolted DRAM does not hang. It corrupts rarely, under load and heat.
 CONFIG_AXP_DCDC3_VOLT=1100
 
 #
