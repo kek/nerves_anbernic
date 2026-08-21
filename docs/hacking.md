@@ -19,10 +19,39 @@ whenever no cached artifact matches the checksum.
 
 ## Almost every edit invalidates the artifact
 
-`package_files()` in `mix.exs` determines the artifact checksum, and it
-includes `README.md`. Editing the README therefore triggers a full rebuild.
-`docs/` is *not* in `package_files()`, which is one reason the long-form notes
-live there.
+`checksum_files()` in `mix.exs` determines the artifact checksum — not
+`package_files()`, which is the longer list of what gets published. The two were
+split precisely so that prose could be edited for free: `README.md` and
+`CHANGELOG.md` are published but excluded from the checksum, and `docs/` is in
+neither, which is why the long-form notes live there.
+
+Ask the gate rather than guessing, since the answer decides whether a
+three-and-a-half-hour build runs:
+
+```bash
+printf 'docs/hacking.md\n' | .github/scripts/build-needed.sh mix.exs   # false
+printf 'REUSE.toml\n'       | .github/scripts/build-needed.sh mix.exs   # true
+```
+
+### The licensing corner of this
+
+`REUSE.toml` *is* in `checksum_files()`, and CI runs `reuse lint`, which needs
+every file in the repository to carry copyright and licence information —
+whether or not it ships. Those two facts collide: adding a new document under
+`docs/` costs nothing, but recording its licence in `REUSE.toml` the way its
+siblings do would throw away every published artifact for one annotation.
+
+So a new doc gets a two-line SPDX header in the file instead, and the
+`REUSE.toml` entry rides along the next time something invalidates the checksum
+anyway. `docs/dram-verification.md` is the current example. This is a wart, not
+a convention worth extending — if several accumulate, move them all in one go
+during a rebuild that was happening regardless.
+
+Worth being clear about what is and is not required here: nothing about the
+licence is needed for distribution, because `docs/` is in neither the artifact
+nor the published package. It is needed to keep a REUSE compliance claim the
+project chose to make and gates on, and REUSE is all-or-nothing — there is no
+partial pass, so one unlicensed file drops the claim for the whole repository.
 
 ## Regenerating the kernel configuration
 

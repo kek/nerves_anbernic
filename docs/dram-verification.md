@@ -1,13 +1,7 @@
 <!--
 SPDX-FileCopyrightText: 2026 Karl Eklund
 SPDX-License-Identifier: CC-BY-4.0
-
-Licensed by a header rather than by an entry in REUSE.toml, unlike its six
-sibling documents. Not a style preference: REUSE.toml is inside
-checksum_files(), so adding one line to it invalidates the Nerves artifact and
-costs a full Buildroot rebuild -- for a licensing annotation. docs/ is outside
-the checksum precisely so prose is free to add. Fold this into REUSE.toml's
-CC-BY-4.0 block next time something invalidates the checksum anyway.
+Here rather than in REUSE.toml, and why: hacking.md, "the licensing corner".
 -->
 
 # DRAM type, verified on hardware
