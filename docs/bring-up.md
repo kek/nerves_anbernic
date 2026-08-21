@@ -5,7 +5,10 @@ sixth and has [its own document](display.md).
 
 ## 1. The board is LPDDR3, not LPDDR4
 
-This is the important one. `configs/anbernic_rg35xx_h700_defconfig` upstream
+This is the important one, and it is now settled from two directions rather
+than inferred from one: the vendor's own bootloader declares LPDDR3, and the
+DRAM controller in the running device is driving it. `tools/dram-type.sh` is
+both checks. `configs/anbernic_rg35xx_h700_defconfig` upstream
 specifies `CONFIG_SUNXI_DRAM_H616_LPDDR4`, and this system copied it verbatim
 on the premise that the H700 Anbernics share a PCB family. They do not share
 memory. With LPDDR4 timings the SPL hangs in DRAM init and the SoC stops
@@ -19,14 +22,70 @@ the struct offset had been read correctly:
 
 ```bash
 sudo dd if=/dev/rdiskN bs=512 skip=16 count=256 of=boot0.bin
-# then read u32s from 0x38: clk, type, dx_odt, dx_dri, ca_dri, odt_en
+tools/dram-type.sh boot0 boot0.bin
 ```
+
+`tools/dram-type.sh` is the mechanical form of that reading, added later to
+settle the question rather than assert it. It does four things the original
+hand-decode did not:
+
+- **Verifies the eGON checksum.** A 32-bit sum over the header's declared
+  length, with the checksum field replaced by Allwinner's stamp value. It
+  passes on this blob, which proves both that the image is intact and that the
+  header layout is the documented one — the arithmetic cannot come out right
+  unless the checksum is at `0x0c` and the length at `0x10`.
+- **Cross-checks five consecutive fields** against `uboot/uboot.defconfig`.
+  The clock, ODT and both drive-strength words all agree, which is the struct
+  offset confirmed rather than assumed.
+- **Reads the mode registers**, which are the strongest signal in the blob and
+  were not looked at the first time. boot0 carries `MR1/MR2/MR3 =
+  0x83/0x1c/0x01`, byte-identical to the sequence u-boot's `mctl_phy_init()`
+  writes on its `SUNXI_DRAM_TYPE_LPDDR3` arm — where the comment reads
+  *"MR1: nWR=14, BL8"*. LPDDR4 is BL16 and its arm writes `0x0, 0x134, …`,
+  nothing alike. These are values the vendor programs into the die itself.
+- **Refuses to decode** a blob whose magic or checksum is wrong, rather than
+  reporting a plausible type from garbage. `tools/dram-type.sh selftest`
+  checks that, against synthesised images, in CI.
+
+`dram_type = 7` is `SUNXI_DRAM_TYPE_LPDDR3` per the enum in
+`arch/arm/include/asm/arch-sunxi/dram_sun50i_h616.h`, where `DDR3 = 3` and
+`DDR4 = 4` — so the non-LP variants are excluded by the same number.
+
+The other half of the question is what the silicon is actually driving, which
+no file can answer. `MSTR`, at `SUNXI_DRAM_CTL0_BASE` = `0x047FB000` on the
+H616, holds the device type in bits `[5:0]` and the burst length in `[19:16]`;
+u-boot writes both from the same switch arm, so they corroborate each other.
+
+```
+tools/dram-type.sh device            # reads it over ssh and decodes
+tools/dram-type.sh mstr 0xc1040008   # or decode a word you read yourself
+```
+
+Measured on the device: **`MSTR = 0xc1040008`** — device type `0x08`
+(`MSTR_DEVICETYPE_LPDDR3`), burst length 8, full bus width, one rank.
+
+That number is worth more than a matching name, because it was derived from
+u-boot's own expression before the hardware was read. `mctl_com_init()` writes
+`BIT(31) | BIT(30) | MSTR_ACTIVE_RANKS(1) | MSTR_BURST_LENGTH(8) |
+MSTR_DEVICETYPE_LPDDR3`, which is `0xc0000000 | 0x01000000 | 0x00040000 | 0x8`
+= `0xc1040008`. The prediction is in the tool's self-test; the silicon returned
+it bit for bit. LPDDR4 would have read `0xc1080020`.
+
+So the controller in this device is driving LPDDR3, and the device serves reads
+out of that DRAM — which settles the die too. The two protocols are mutually
+unintelligible at the command level: a controller configured for LPDDR3 cannot
+train, let alone serve traffic, against an LPDDR4 device.
+
+Worth knowing before running `device`: a stray MMIO read has hung this SoC
+before. The DRAM controller is a live, documented window and this is a read, so
+the risk is low and the worst case is a power cycle — but it is not zero. It
+did not hang when this was measured.
 
 If you ever doubt an inherited hardware parameter, that is the technique: a
 firmware known to boot the hardware is ground truth in a way a sibling
 board's defconfig is not. See the comment in `uboot/uboot.defconfig`, which
 also records that the TPR field ordering is *inferred* rather than confirmed
-against a struct definition.
+against a struct definition — the one part of this the tool does not settle.
 
 ## 2. `pwrseq_simple` aborts instead of using its own GPIO fallback
 

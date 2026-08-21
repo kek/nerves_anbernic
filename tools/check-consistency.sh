@@ -329,6 +329,57 @@ if [ "$custom_only" -gt 0 ]; then
     fi
 fi
 
+echo "==> dram type"
+
+# The one setting in this repository whose wrong value produces a device with
+# no console, no LED and no FEL -- indistinguishable from dead hardware.
+# Upstream's anbernic_rg35xx_h700_defconfig says LPDDR4; this board is LPDDR3,
+# established from the vendor boot0 (tools/dram-type.sh, docs/bring-up.md).
+# Anyone reconciling this file with upstream would flip it back, and the build
+# would succeed.
+UBOOT=uboot/uboot.defconfig
+
+if grep -q '^CONFIG_SUNXI_DRAM_H616_LPDDR3=y$' "$UBOOT"; then
+    ok "U-Boot is configured for LPDDR3"
+else
+    fail "$UBOOT does not set CONFIG_SUNXI_DRAM_H616_LPDDR3=y"
+    fail "This board is LPDDR3. LPDDR4 timings hang the SPL in DRAM init."
+fi
+
+if grep -q '^CONFIG_SUNXI_DRAM_H616_LPDDR4=y$' "$UBOOT"; then
+    fail "$UBOOT sets CONFIG_SUNXI_DRAM_H616_LPDDR4=y -- that hangs this SoC"
+fi
+
+# The type alone is not enough: the drive-strength, ODT and clock values are
+# from the same boot0 struct and belong to the same answer. A mixture of
+# LPDDR3 type with upstream's LPDDR4 values is not a configuration anything
+# has run.
+dram_expect() { # dram_expect <symbol> <value>
+    got=$(awk -F= -v s="$1" '$1==s{print $2}' "$UBOOT")
+    if [ "$got" = "$2" ]; then
+        ok "$1=$2"
+    else
+        fail "$1 is '${got:-unset}', expected $2 (from the vendor boot0)"
+    fi
+}
+
+dram_expect CONFIG_DRAM_CLK 672
+dram_expect CONFIG_DRAM_SUNXI_DX_ODT 0x06060606
+dram_expect CONFIG_DRAM_SUNXI_DX_DRI 0x0d0d0d0d
+dram_expect CONFIG_DRAM_SUNXI_CA_DRI 0x1919
+dram_expect CONFIG_DRAM_SUNXI_ODT_EN 0x9988eeee
+
+# TPR6 and TPR10 have no Kconfig default, so omitting either makes the build
+# stop at an interactive prompt rather than fail -- which in CI reads as a
+# hang, not a misconfiguration.
+for sym in CONFIG_DRAM_SUNXI_TPR6 CONFIG_DRAM_SUNXI_TPR10; do
+    if grep -q "^${sym}=" "$UBOOT"; then
+        ok "$sym is set, so Kconfig will not prompt"
+    else
+        fail "$sym has no Kconfig default; without it the build waits for input"
+    fi
+done
+
 echo "==> firmware validation"
 
 # Revert protection depends on exactly one variable here, nerves_fw_validated,

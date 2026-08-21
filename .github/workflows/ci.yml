@@ -185,6 +185,15 @@ jobs:
         # checker's self-test below, same second of runtime.
         run: .github/scripts/build-needed-selftest.sh
 
+      - name: Test the DRAM type decoders themselves
+        # tools/dram-type.sh is what settles LPDDR3 vs LPDDR4, and the answer
+        # it produces gets written into a defconfig whose wrong value makes the
+        # SoC unresponsive. A decoder that mis-parses would be confidently
+        # wrong, so it is tested against synthesised boot0 images -- including
+        # a corrupted one and one with LPDDR4's mode registers, which it must
+        # refuse rather than decode.
+        run: tools/dram-type.sh selftest
+
       - name: Test the GPU stack checker itself
         # The checker runs as the last step of a 3.5 hour job, so a one-line
         # shell mistake in it costs 3.5 hours to find. That happened twice in
