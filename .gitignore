@@ -28,3 +28,6 @@ erl_crash.dump
 #
 # Not in package_files(), so this line does not move the artifact checksum.
 /nerves_system_rg40xxv-portable-*.tar.gz
+
+# Work area for tools/dram-falsify.sh (built SPL variants, Docker context)
+/.dram-falsify/
