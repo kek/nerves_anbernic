@@ -8,11 +8,11 @@
 # Elixir can read, and sysboot/squashfs so U-Boot can read
 # extlinux-{a,b}.conf straight out of the active rootfs partition.
 #
-# "Taken verbatim from upstream" is the sentence that already cost this project
-# a week, so read it as a warning rather than a provenance note. The file it was
-# copied from is an *LPDDR4* defconfig. The DRAM half of that copy was caught
-# and replaced; the PMIC half was not reconsidered, and one value in it is
-# memory-type-dependent -- see the note on CONFIG_AXP_DCDC3_VOLT below.
+# Read "taken verbatim from upstream" as a warning rather than as provenance.
+# The file it was copied from is an *LPDDR4* defconfig. The DRAM half of that
+# copy did not work on this board and was replaced; the PMIC half was not
+# reconsidered at the time, and one value in it turns out to be
+# memory-type-dependent too -- see the note on CONFIG_AXP_DCDC3_VOLT below.
 
 CONFIG_ARM=y
 CONFIG_ARCH_SUNXI=y
@@ -87,23 +87,28 @@ CONFIG_REGULATOR_AXP=y
 CONFIG_AXP717_POWER=y
 CONFIG_AXP_DCDC2_VOLT=940
 
-# DCDC3 is vdd-dram, and 1100 is inherited from an LPDDR4 defconfig. **Open
-# question, not a settled value.** ROCKNIX's LPDDR3 build programs 1200 into
-# this same PMIC on these same boards, 1.2 V being LPDDR3's nominal VDD2, and
-# ROCKNIX reads 1.1 V here as *meaning* LPDDR4. So this may be LPDDR3 memory
-# running 100 mV under nominal -- the same inherited-block mistake as the
-# timings, caught on the DRAM half and missed on this one.
+# DCDC3 is vdd-dram, at LPDDR3's nominal 1.2 V. It was 1100 until 2026-08-21 --
+# inherited verbatim from an LPDDR4 defconfig along with the rest of this PMIC
+# block, which is the same mistake as the DRAM timings, caught on that half and
+# missed on this one. ROCKNIX's LPDDR3 build programs 1200 into this same PMIC
+# on these same boards, and its installer reads 1.1 V here as *meaning* LPDDR4.
 #
-# Not changed yet, deliberately, and it must not be changed here alone. The
-# board device tree pins vdd-dram at min == max == 1100000 with
-# regulator-always-on, so raising only this value would train DRAM at 1.2 V and
-# then let the kernel drag the rail back to 1.1 V at regulator registration --
-# worse than either steady state. The DTS override and this line have to land
-# together, after a FEL training check, and the whole sequence is written up
-# under "The 1.2 V experiment" in docs/dram-verification.md.
+# The SPL programs the PMIC before DRAM training, so this value is the voltage
+# training actually happens at. It must stay equal to the dcdc3 override in
+# linux/sun50i-h700-anbernic-rg40xx-v.dts, which is what Linux leaves the rail
+# at -- the inherited node pins min == max with regulator-always-on, so raising
+# one without the other trains at one voltage and runs at the other.
+# tools/check-consistency.sh asserts they agree.
 #
-# Undervolted DRAM does not hang. It corrupts rarely, under load and heat.
-CONFIG_AXP_DCDC3_VOLT=1100
+# Verified to train before being committed, over FEL and with no rebuild:
+# `tools/dram-falsify.sh test lpddr3-vdd1v2` brought DRAM up with two addresses
+# 1 MB apart independent. Still to do on hardware is the part FEL cannot show:
+# confirm the rail reads 1200000 in sysfs after a burn, then soak it warm.
+# docs/dram-verification.md has the sequence.
+#
+# Undervolted DRAM does not hang. It corrupts rarely, under load and heat --
+# which is why "it has always worked at 1.1 V" was never much evidence.
+CONFIG_AXP_DCDC3_VOLT=1200
 
 #
 # Nerves: environment block on the MicroSD.

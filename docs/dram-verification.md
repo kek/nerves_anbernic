@@ -268,13 +268,28 @@ trains and runs at 1.1 V, but the stability margin is unquantified.
 Note the pinning also blinds ROCKNIX's voltage-based detection trick on
 our image: sysfs will read 1.1 V regardless of chip.
 
-### The 1.2 V experiment (designed, not yet run)
+### The 1.2 V experiment (edits landed, soak outstanding)
 
 Goal: decide whether to ship the DRAM rail at LPDDR3-nominal 1.2 V, by
 showing it trains and survives a soak, ideally against a 1.1 V control.
 
-**Changes required — all three are `checksum_files()`, so they share one
-full rebuild (1–3.5 h, ~25 GB free, strictly one build at a time):**
+**Where this stands (2026-08-21).** The FEL training check passed:
+`tools/dram-falsify.sh test lpddr3-vdd1v2` brought DRAM up with two addresses
+1 MB apart independent, on an SPL differing from the control by seven bytes.
+On that basis all three edits below are committed — `CONFIG_AXP_DCDC3_VOLT` is
+1200, the board DTS overrides `dcdc3` to 1200000 by full path, and `memtester`
+is in the image. Three checks now hold the pieces together:
+`tools/check-consistency.sh` asserts the SPL and the DTS name the same voltage
+and fails loudly if they diverge, `tools/check-dts.sh` asserts the value
+reached the compiled DTB, and both run on every push.
+
+What is **not** done is everything FEL cannot show: nothing has been burned, so
+the rail has never been read on a running system at 1.2 V, and no soak has run.
+Steps 2 and 3 below are the outstanding work, and until they are done this is a
+by-the-book value that trains, not a value that has been shown to be better.
+
+**The three changes, all in `checksum_files()`, so they share one full rebuild
+(1–3.5 h, ~25 GB free, strictly one build at a time):**
 
 1. `uboot/uboot.defconfig`: `CONFIG_AXP_DCDC3_VOLT=1100` → `1200`. The
    SPL programs the AXP717 before DRAM training, so this is the voltage

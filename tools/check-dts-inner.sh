@@ -98,6 +98,35 @@ case "$mmc2_cd" in
        rc=1 ;;
 esac
 assert_match "mmc2 3V3 load switch present" 'regulator-name = "vcc3v3-mmc2"'
+
+# The DRAM rail. rg35xx-plus.dts pins vdd-dram at 1.1 V -- an LPDDR4 voltage --
+# and this unit's memory is LPDDR3, so the board DTS overrides it. Asserted
+# against the compiled DTB because the override is addressed by full path
+# rather than by a label: dtc erroring on a bad path proves the node exists,
+# but not that the value is the one Linux will actually apply.
+#
+# The expected value is read out of the DTS source rather than written here, so
+# this cannot become a third place the voltage is recorded.
+# tools/check-consistency.sh is what holds the DTS and the SPL to each other.
+DCDC3=/soc/i2c@7081400/pmic@34/regulators/dcdc3
+want_uv=$(sed -n '/dcdc3}/,/^};/s/.*regulator-min-microvolt = <\([0-9]*\)>.*/\1/p' \
+    "/repo/linux/${DTS_NAME}.dts")
+
+if [ -z "$want_uv" ]; then
+    echo "  FAILED   the board DTS no longer overrides dcdc3's minimum microvolts,"
+    echo "           so Linux keeps rg35xx-plus.dts's 1.1 V on LPDDR3 memory."
+    rc=1
+else
+    for prop in regulator-min-microvolt regulator-max-microvolt; do
+        got=$(fdtget -t u /tmp/board.dtb "$DCDC3" "$prop" 2>/dev/null || echo MISSING)
+        if [ "$got" = "$want_uv" ]; then
+            echo "  ok       vdd-dram $prop reached the DTB as $got"
+        else
+            echo "  FAILED   vdd-dram $prop reads '$got', the DTS asks for $want_uv"
+            rc=1
+        fi
+    done
+fi
 # 4-bit, and 3V3-only. The vendor DTB sets sunxi-dis-signal-vol-sw; dropping
 # no-1-8-v would let the core try a UHS voltage switch the slot cannot do.
 mmc2_bw=$(fdtget /tmp/board.dtb /soc/mmc@4022000 bus-width 2>/dev/null || echo MISSING)

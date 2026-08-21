@@ -380,6 +380,39 @@ for sym in CONFIG_DRAM_SUNXI_TPR6 CONFIG_DRAM_SUNXI_TPR10; do
     fi
 done
 
+# The DRAM rail is set in two files and both have to agree. The SPL programs
+# the PMIC before DRAM training, so uboot.defconfig decides what training runs
+# at; the device tree decides what Linux leaves the rail at, and the inherited
+# node pins min == max with regulator-always-on, so it really does force it.
+#
+# Raising one without the other trains at one voltage and runs at another, which
+# is worse than either value alone and produces nothing observable -- no hang,
+# no log, just a rail 100 mV from where training happened. Exactly the shape
+# this file exists to catch.
+DTS=linux/sun50i-h700-anbernic-rg40xx-v.dts
+
+spl_mv=$(awk -F= '$1=="CONFIG_AXP_DCDC3_VOLT"{print $2}' "$UBOOT")
+
+# The override is addressed by path, and both properties must carry the same
+# value -- a min/max pair that disagrees would be a range the kernel could move
+# within rather than the pin this assumes.
+dts_uv=$(awk '/dcdc3\}/,/^};/' "$DTS" | sed -n 's/.*regulator-min-microvolt = <\([0-9]*\)>.*/\1/p')
+dts_max=$(awk '/dcdc3\}/,/^};/' "$DTS" | sed -n 's/.*regulator-max-microvolt = <\([0-9]*\)>.*/\1/p')
+
+if [ -z "$spl_mv" ]; then
+    fail "CONFIG_AXP_DCDC3_VOLT is not set in $UBOOT"
+elif [ -z "$dts_uv" ] || [ -z "$dts_max" ]; then
+    fail "$DTS does not override dcdc3's min and max microvolts"
+    fail "so Linux keeps the value inherited from rg35xx-plus.dts, whatever it is"
+elif [ "$dts_uv" != "$dts_max" ]; then
+    fail "dcdc3 min ($dts_uv) and max ($dts_max) differ; this check assumes a pin"
+elif [ "$(( spl_mv * 1000 ))" -eq "$dts_uv" ]; then
+    ok "vdd-dram is ${spl_mv} mV in both the SPL and the device tree"
+else
+    fail "vdd-dram disagrees: SPL trains at ${spl_mv} mV, the DTS pins $((dts_uv / 1000)) mV"
+    fail "Training at one voltage and running at another is worse than either."
+fi
+
 echo "==> firmware validation"
 
 # Revert protection depends on exactly one variable here, nerves_fw_validated,

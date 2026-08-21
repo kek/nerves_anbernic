@@ -116,6 +116,14 @@ BR2_PACKAGE_LIBP11=y
 BR2_PACKAGE_UNIXODBC=y
 BR2_PACKAGE_DTC=y
 BR2_PACKAGE_DTC_PROGRAMS=y
+
+# The soak tool for the vdd-dram question (docs/dram-verification.md). It locks
+# and pattern-tests memory, which is what distinguishes a marginal DRAM rail
+# from a working one -- the failure mode there is rare corruption under load and
+# heat, not a hang, so it cannot be observed by using the device normally.
+# ~40 KB, and worth carrying: a device with 1 GB of DRAM whose rail voltage was
+# inherited from another memory type should be able to answer that on demand.
+BR2_PACKAGE_MEMTESTER=y
 BR2_PACKAGE_LIBMNL=y
 # Bring-up tools. On-device verification is the unfinished half of this
 # system: the button GPIO mapping and the audio routing are inherited from

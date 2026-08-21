@@ -522,3 +522,28 @@
 		reg = <0x0000 0x1e000>;
 	};
 };
+
+/*
+ * vdd-dram at LPDDR3's nominal 1.2 V, overriding the 1.1 V inherited from
+ * rg35xx-plus.dts.
+ *
+ * The inherited value is an LPDDR4 rail voltage, and this unit's memory is
+ * LPDDR3 (docs/dram-verification.md). ROCKNIX's LPDDR3 U-Boot programs 1200
+ * into this same PMIC on these same boards, and its installer reads 1.1 V here
+ * as *meaning* LPDDR4.
+ *
+ * This must stay equal to CONFIG_AXP_DCDC3_VOLT in uboot/uboot.defconfig, and
+ * tools/check-consistency.sh asserts that. The SPL programs the PMIC before
+ * DRAM training, so the defconfig decides what training runs at; this node
+ * decides what Linux leaves the rail at. Raising one without the other trains
+ * at one voltage and runs at the other, which is worse than either alone --
+ * the inherited node pins min == max with regulator-always-on, so the kernel
+ * really does force it back.
+ *
+ * Addressed by path because this label is not in the DTB's symbol table and
+ * was never verified; the path came out of the built DTB.
+ */
+&{/soc/i2c@7081400/pmic@34/regulators/dcdc3} {
+	regulator-min-microvolt = <1200000>;
+	regulator-max-microvolt = <1200000>;
+};
