@@ -6,8 +6,12 @@ not by this repo's own earlier prose.
 
 ## Why it needed verifying at all
 
-Every published spec — Anbernic's product page, reviews, even the ROCKNIX
-wiki — says the RG40XX V has "1 GB LPDDR4". Meanwhile this repo's
+The "1 GB LPDDR4" claim circulates in reviews and in the ROCKNIX wiki
+(whose RG40XX V hardware table reads "RAM: 1 GB LPDDR4" — verified
+directly). Anbernic's own product pages, checked directly for both the
+RG40XX V and RG40XX H, say only "RAM: 1GB" with no type at all — the
+LPDDR4 attribution is secondhand everywhere it appears. Meanwhile this
+repo's
 `uboot/uboot.defconfig` selects `CONFIG_SUNXI_DRAM_H616_LPDDR3`, justified
 only by documentation written during bring-up ([bring-up.md](bring-up.md)
 §1). Nothing committed here was primary evidence: no boot0 dump, no boot
@@ -24,8 +28,9 @@ Two external facts reframe the question:
   a reliable predictor of DRAM type across the H700 line. Whether two
   RG40XXV units specifically have shipped with different types is
   unobserved by us; what is certain is that both types exist across the
-  H700 family, and that this unit is LPDDR3 despite the model's published
-  LPDDR4 spec. "The H700 family is uniformly LPDDR4" is simply wrong.
+  H700 family, and that this unit is LPDDR3 despite the LPDDR4 label the
+  model carries in community documentation. "The H700 family is uniformly
+  LPDDR4" is simply wrong.
 - **Allwinner's H700 product brief** lists the memory interface as
   "DDR4/DDR3/DDR3L/LPDDR3/LPDDR4" — both types are first-class options for
   H700 designs, so nothing about the SoC settles it.
