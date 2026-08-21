@@ -3,13 +3,22 @@
 Five things, none of which were visible from source review. The display was a
 sixth and has [its own document](display.md).
 
-## 1. The board is LPDDR3, not LPDDR4
+## 1. This unit is LPDDR3, not LPDDR4
 
 This is the important one. `configs/anbernic_rg35xx_h700_defconfig` upstream
 specifies `CONFIG_SUNXI_DRAM_H616_LPDDR4`, and this system copied it verbatim
 on the premise that the H700 Anbernics share a PCB family. They do not share
 memory. With LPDDR4 timings the SPL hangs in DRAM init and the SoC stops
 responding entirely — no console, no LED, indistinguishable from a dead device.
+
+Since first written, this claim has been verified on the hardware itself by a
+differential FEL experiment, and sharpened: both DRAM types exist across the
+H700 Anbernic line and model identity does not reliably predict which
+(ROCKNIX ships both an LPDDR3 and an LPDDR4 U-Boot for H700 and selects by a
+measured regulator voltage rather than by model), so this section's finding
+is about this unit rather than the RG40XXV as a model. Transcript, method,
+and an open vdd-dram voltage question live in
+[dram-verification.md](dram-verification.md).
 
 The correct values came from the **vendor boot0 on a muOS card** that boots
 this hardware. Its `dram_para` struct at offset `0x38` declares
