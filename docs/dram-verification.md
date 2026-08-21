@@ -97,10 +97,72 @@ Our SPL sets `CONFIG_AXP_DCDC3_VOLT=1100` and the inherited upstream DTS
 always-on at 1.1 V — the LPDDR4 voltage. ROCKNIX's LPDDR3 build uses
 **1200**, matching LPDDR3's nominal 1.2 V VDD2. This unit demonstrably
 trains and runs at 1.1 V, but the stability margin is unquantified.
-Follow-up: try `CONFIG_AXP_DCDC3_VOLT=1200` plus a DTS override of the
-dcdc3 constraint, and soak-test (memtester) at both voltages before
-changing anything. Note this pinning also blinds ROCKNIX's voltage-based
-detection trick on our image: sysfs will read 1.1 V regardless of chip.
+Note the pinning also blinds ROCKNIX's voltage-based detection trick on
+our image: sysfs will read 1.1 V regardless of chip.
+
+### The 1.2 V experiment (designed, not yet run)
+
+Goal: decide whether to ship the DRAM rail at LPDDR3-nominal 1.2 V, by
+showing it trains and survives a soak, ideally against a 1.1 V control.
+
+**Changes required — all three are `checksum_files()`, so they share one
+full rebuild (1–3.5 h, ~25 GB free, strictly one build at a time):**
+
+1. `uboot/uboot.defconfig`: `CONFIG_AXP_DCDC3_VOLT=1100` → `1200`. The
+   SPL programs the AXP717 before DRAM training, so this is the voltage
+   the training actually happens at. (Rider: fix the over-strong
+   "The RG40XXV has LPDDR3" comment while the checksum is already
+   invalidated.)
+2. `linux/sun50i-h700-anbernic-rg40xx-v.dts`: override the inherited pin,
+   or the kernel will drag the rail back to 1.1 V at regulator
+   registration — training at 1.2 V and then undervolting mid-run is
+   worse than either steady state. Both edits must land together:
+
+   ```dts
+   &reg_dcdc3 {
+           regulator-min-microvolt = <1200000>;
+           regulator-max-microvolt = <1200000>;
+   };
+   ```
+3. `nerves_defconfig`: add `BR2_PACKAGE_MEMTESTER=y` — the soak tool,
+   riding the same rebuild for free.
+
+Mind the path-referenced-content trap ([hacking.md](hacking.md)): the DTS
+is consumed via `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH`, and an already-stamped
+linux package silently ships the previous bytes under a fresh checksum.
+
+**Verification sequence:**
+
+1. *FEL training check (cheap, nothing flashed):* load the new SPL with
+   the kit in `~/src/rg40xxv-fel-test/` and confirm the 1 MiB pattern
+   readback at 1.2 V. Same A-B bracketing as before, with the current
+   1.1 V SPL as the known-good arm.
+2. *Rail confirmation:* burn and boot, then read
+   `/sys/class/regulator/*/microvolts` for `vdd-dram` — it should now say
+   1200000, and for the first time the reading is meaningful rather than
+   an echo of our own pin. (This also un-blinds the ROCKNIX-style
+   detection on our image.)
+3. *Soak:* `memtester 700M <loops>` from an SSH/iex session (`System.cmd`)
+   — the device has 1 GB, so ~700 MB locks most of what Linux + BEAM
+   leave free. Several hours to overnight. Run it warm: shell closed,
+   CPU/GPU load alongside, because marginal DRAM fails hot, not on an
+   idle bench.
+4. *Control arm:* the same soak at 1.1 V. Honest cost accounting: that
+   needs either a second build with only `DCDC3_VOLT` reverted (another
+   full rebuild), or accepting the unit's boot-and-run history at 1.1 V
+   as the informal control. A runtime-switchable rail (widened DTS range
+   plus a userspace regulator consumer) would allow same-build A/B but
+   adds kernel-config complexity that likely isn't worth it here.
+
+**Interpretation:** zero errors at 1.2 V warm ⇒ at least as good as
+1.1 V, matches the community build and the chip's nominal spec — ship it.
+Errors at 1.1 V but not 1.2 V ⇒ the undervolt was a real margin problem.
+Errors at both ⇒ the problem isn't voltage; investigate timings.
+
+**Risk:** low. 1.2 V is LPDDR3's nominal VDD2 and exactly what ROCKNIX's
+LPDDR3 build programs into the same PMIC on the same boards. Worst case
+is a non-booting SD image, recovered by reflashing the known-good 0.2.0
+image or via FEL; nothing here can brick an SD-boot device.
 
 A wording nit deferred on purpose: the comment in `uboot/uboot.defconfig`
 still says "The RG40XXV has LPDDR3", which overstates (it should say "this
