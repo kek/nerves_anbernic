@@ -258,22 +258,45 @@ than on the host. U-Boot's host tools want OpenSSL headers, `swig` and
 builds U-Boot in Linux for the same reasons. Also note macOS `make` is GNU Make
 3.81, which predates `undefine` and dies in U-Boot's Makefile; `gmake` works.
 
-## Open question: vdd-dram is 100 mV under the community value
+## Resolved: vdd-dram was 100 mV under the vendor's own value
 
-Our SPL sets `CONFIG_AXP_DCDC3_VOLT=1100` and the inherited upstream DTS
-(`sun50i-h700-anbernic-rg35xx-2024.dts`) pins the `vdd-dram` regulator
-always-on at 1.1 V — the LPDDR4 voltage. ROCKNIX's LPDDR3 build uses
-**1200**, matching LPDDR3's nominal 1.2 V VDD2. This unit demonstrably
-trains and runs at 1.1 V, but the stability margin is unquantified.
-Note the pinning also blinds ROCKNIX's voltage-based detection trick on
-our image: sysfs will read 1.1 V regardless of chip.
+Our SPL set `CONFIG_AXP_DCDC3_VOLT=1100` and the inherited upstream DTS pinned
+the `vdd-dram` regulator always-on at 1.1 V — the LPDDR4 voltage — on LPDDR3
+memory. ROCKNIX's LPDDR3 build uses **1200**, matching LPDDR3's nominal 1.2 V
+VDD2.
 
-### The 1.2 V experiment (edits landed, soak outstanding)
+**Settled by reading Anbernic's own firmware, 2026-08-21.** Booted the muOS card
+on this unit and read the PMIC:
+
+    axp2202-dcdc2   940000 uV  enabled
+    axp2202-dcdc3  1200000 uV  enabled
+
+So the vendor runs the DRAM rail at **1.2 V**, and our 1.1 V was an import, not
+a board characteristic. Worth noting how that reading was made trustworthy: the
+vendor's 4.9 kernel calls the PMIC `axp2202` rather than `axp717` and names its
+regulators generically, with no `vdd-dram` label, so "dcdc3" had to be confirmed
+as the same rail before being believed. `dcdc2` reading exactly 940000 — the
+value this repo's own `CONFIG_AXP_DCDC2_VOLT` sets — is that confirmation: the
+numbering matches between the two drivers.
+
+This also retires the inference that had been standing in for a measurement.
+ROCKNIX picks its U-Boot by reading this rail, 1.2 V meaning LPDDR3, and that
+heuristic classifying these units correctly *required* stock to be at 1.2 V.
+It is, but the argument is no longer needed.
+
+One consequence of our own pinning is worth keeping: on an image of ours, sysfs
+reads whatever we pinned regardless of the chip fitted, so ROCKNIX-style
+detection cannot work against our firmware. Only stock or vendor firmware gives
+that reading meaning.
+
+### The change, and what is still unmeasured
 
 Goal: decide whether to ship the DRAM rail at LPDDR3-nominal 1.2 V, by
 showing it trains and survives a soak, ideally against a 1.1 V control.
 
-**Where this stands (2026-08-21).** The FEL training check passed:
+**Where this stands (2026-08-21).** Matching the vendor is now the reason for
+the value; the checks below are what confirm we match it correctly. The FEL
+training check passed:
 `tools/dram-falsify.sh test lpddr3-vdd1v2` brought DRAM up with two addresses
 1 MB apart independent, on an SPL differing from the control by seven bytes.
 On that basis all three edits below are committed — `CONFIG_AXP_DCDC3_VOLT` is
@@ -284,9 +307,15 @@ and fails loudly if they diverge, `tools/check-dts.sh` asserts the value
 reached the compiled DTB, and both run on every push.
 
 What is **not** done is everything FEL cannot show: nothing has been burned, so
-the rail has never been read on a running system at 1.2 V, and no soak has run.
-Steps 2 and 3 below are the outstanding work, and until they are done this is a
-by-the-book value that trains, not a value that has been shown to be better.
+our own rail has never been read on a running system at 1.2 V, and no soak has
+run. Steps 2 and 3 below are the outstanding work.
+
+The soak is no longer the thing deciding whether to ship 1.2 V — the vendor's
+own value decides that. It is now confirmation that we match it in practice, and
+the more interesting question it can still answer is whether the previous 1.1 V
+was doing quiet damage. That would need a soak at the old voltage to detect, and
+nobody has run one, so it stays an open question about the past rather than a
+risk in the present.
 
 **The three changes, all in `checksum_files()`, so they share one full rebuild
 (1–3.5 h, ~25 GB free, strictly one build at a time):**

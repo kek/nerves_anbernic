@@ -87,11 +87,17 @@ CONFIG_REGULATOR_AXP=y
 CONFIG_AXP717_POWER=y
 CONFIG_AXP_DCDC2_VOLT=940
 
-# DCDC3 is vdd-dram, at LPDDR3's nominal 1.2 V. It was 1100 until 2026-08-21 --
-# inherited verbatim from an LPDDR4 defconfig along with the rest of this PMIC
-# block, which is the same mistake as the DRAM timings, caught on that half and
-# missed on this one. ROCKNIX's LPDDR3 build programs 1200 into this same PMIC
-# on these same boards, and its installer reads 1.1 V here as *meaning* LPDDR4.
+# DCDC3 is vdd-dram, at 1.2 V because that is what Anbernic runs. It was 1100
+# until 2026-08-21 -- inherited verbatim from an LPDDR4 defconfig along with the
+# rest of this PMIC block, which is the same mistake as the DRAM timings, caught
+# on that half and missed on this one. Of the two voltages copied, DCDC2 was
+# right and this one was not.
+#
+# Measured, not reasoned: booting the muOS card on this unit and reading the
+# PMIC gives dcdc3 = 1200000 uV. The vendor kernel calls the chip axp2202 and
+# does not label the rail, so dcdc2 reading exactly 940000 -- the value set
+# below -- is what confirms the numbering matches before believing dcdc3.
+# 1.2 V is also LPDDR3's nominal VDD2 and what ROCKNIX's LPDDR3 build programs.
 #
 # The SPL programs the PMIC before DRAM training, so this value is the voltage
 # training actually happens at. It must stay equal to the dcdc3 override in

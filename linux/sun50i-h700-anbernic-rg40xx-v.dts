@@ -528,9 +528,9 @@
  * rg35xx-plus.dts.
  *
  * The inherited value is an LPDDR4 rail voltage, and this unit's memory is
- * LPDDR3 (docs/dram-verification.md). ROCKNIX's LPDDR3 U-Boot programs 1200
- * into this same PMIC on these same boards, and its installer reads 1.1 V here
- * as *meaning* LPDDR4.
+ * LPDDR3. 1.2 V is what Anbernic's own firmware runs: booting muOS on this unit
+ * reads dcdc3 = 1200000 uV, with dcdc2 = 940000 confirming the rail numbering.
+ * See docs/dram-verification.md.
  *
  * This must stay equal to CONFIG_AXP_DCDC3_VOLT in uboot/uboot.defconfig, and
  * tools/check-consistency.sh asserts that. The SPL programs the PMIC before
