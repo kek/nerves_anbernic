@@ -12,9 +12,22 @@
 # Anbernic's own specifications say the H700 family is uniformly 1 GB LPDDR4,
 # and one plausible reconciliation is that our dram type setting is inert --
 # that DRAM init happens in a vendor blob and the Kconfig symbol is never
-# consulted, so LPDDR3 and LPDDR4 would both "work". This decides that: if the
-# symbol is inert, every variant below brings up DRAM. If it is load-bearing,
-# only the right one does.
+# consulted, so LPDDR3 and LPDDR4 would both "work".
+#
+# Run on 2026-08-21, with the three outcomes written down before the device was
+# touched. The result:
+#
+#   lpddr3            DRAM up, 0x40000000 and 0x40100000 independent
+#   lpddr4-upstream   SPL hung in DRAM init
+#   lpddr4-typeonly   SPL hung in DRAM init
+#   ddr3-typeonly     SPL hung in DRAM init
+#
+# So the symbol is not inert -- the two type-only variants change nothing but
+# the protocol, same clock and ODT and drive strengths and TPR words, and they
+# turn a working init into a hang. A value that is never consulted cannot do
+# that. And the die is not LPDDR4: lpddr4-upstream is the exact configuration
+# upstream ships for the H700 Anbernic the specifications call identical
+# hardware, and it does not train this memory.
 #
 # Why FEL and not firmware
 # ------------------------
@@ -68,6 +81,43 @@ expected() { # expected <variant>
         lpddr4-typeonly) echo "no DRAM, and if it does come up the symbol is inert" ;;
         ddr3-typeonly)   echo "no DRAM, and if it does come up the symbol is inert" ;;
     esac
+}
+
+# What the matrix actually did on 2026-08-21, on the one unit that exists here.
+# Recorded so a later run is a regression test rather than a fresh opinion: if
+# the DRAM values are ever changed, this matrix should still come out this way,
+# and a variant that disagrees with its recorded outcome is the finding.
+recorded() { # recorded <variant>
+    case "$1" in
+        lpddr3)          echo "up" ;;
+        lpddr4-upstream) echo "hung" ;;
+        lpddr4-typeonly) echo "hung" ;;
+        ddr3-typeonly)   echo "hung" ;;
+    esac
+}
+
+describe_outcome() { # describe_outcome <outcome>
+    case "$1" in
+        up)      echo "DRAM up, two addresses 1 MB apart independent" ;;
+        hung)    echo "SPL did not return -- DRAM init hung" ;;
+        alias)   echo "DRAM answers but aliases" ;;
+        no-rt)   echo "DRAM did not round-trip" ;;
+        no-fel)  echo "no device in FEL mode" ;;
+        *)       echo "$1" ;;
+    esac
+}
+
+# Compare against the record and say so either way. A run that reproduces is
+# worth printing: this whole tool exists because "it worked" was doing too much
+# unexamined work.
+compare() { # compare <variant> <outcome>
+    local want; want=$(recorded "$1")
+    if [ "$2" = "$want" ]; then
+        note "matches the outcome recorded on 2026-08-21 ($want)"
+    else
+        fail "recorded outcome for $1 was '$want', this run gave '$2'"
+        note "that is a real change -- $(describe_outcome "$want") was expected"
+    fi
 }
 
 rc=0
@@ -170,7 +220,7 @@ variants() {
         local f="$WORK/out/spl-$v.bin"
         if [ -r "$f" ]; then
             any=1
-            printf '  %-18s %6s bytes  %s\n' "$v" "$(wc -c < "$f" | tr -d ' ')" "$(expected "$v")"
+            printf '  %-18s %6s bytes  recorded: %s\n' "$v" "$(wc -c < "$f" | tr -d ' ')" "$(describe_outcome "$(recorded "$v")")"
         fi
     done
     [ "$any" -eq 1 ] || echo "  (none -- run 'build' first)"
@@ -208,6 +258,7 @@ test_variant() { # test_variant <variant>
         echo
         echo "  RESULT   the SPL did not return -- DRAM init hung"
         note "this is what a wrong DRAM type looks like on this SoC"
+        compare "$v" hung
         return
     fi
     ok "the SPL ran and returned"
@@ -216,6 +267,7 @@ test_variant() { # test_variant <variant>
         echo
         echo "  RESULT   the device left the USB bus after running the SPL"
         note "hung after returning; still a failure to bring up DRAM"
+        compare "$v" hung
         return
     fi
 
@@ -235,11 +287,14 @@ test_variant() { # test_variant <variant>
 
     if [ "$ra" = "0xcafebabe" ] && [ "$rb" = "0x5a5a5a5a" ]; then
         echo "  RESULT   DRAM came up and two addresses 1 MB apart are independent"
+        compare "$v" up
     elif [ "$ra" = "$rb" ]; then
         echo "  RESULT   both addresses read the same -- DRAM answers but aliases"
         note "wrong geometry rather than wrong timings; boots and corrupts later"
+        compare "$v" alias
     else
         echo "  RESULT   DRAM did not round-trip"
+        compare "$v" no-rt
     fi
 }
 

@@ -81,6 +81,53 @@ before. The DRAM controller is a live, documented window and this is a read, so
 the risk is low and the worst case is a power cycle — but it is not zero. It
 did not hang when this was measured.
 
+### The negative control
+
+Two positive measurements still leave a loophole: perhaps the setting is inert.
+Anbernic's specifications say the H700 family is uniformly 1 GB LPDDR4, and the
+reconciliation offered for that is that DRAM init happens in a vendor blob and
+the Kconfig symbol is never consulted — in which case LPDDR3 and LPDDR4 would
+both appear to work.
+
+That is checkable twice over, and both checks close it.
+
+**There is no vendor blob in this boot chain.** `fwup.conf` writes
+`u-boot-sunxi-with-spl.bin` at `UBOOT_OFFSET`, block 16 — byte 8192, exactly
+where a vendor boot0 lives, so ours replaces it. Read back from the device, the
+64 KiB at byte 8192 hashes identical to this repository's own built image for
+the firmware version the device reports, and its eGON header declares 40960
+bytes: a mainline sunxi SPL, not the vendor's 65536.
+
+**And the symbol is load-bearing.** `tools/dram-falsify.sh` builds four SPLs
+from one U-Boot tree differing only in DRAM configuration and runs each over
+FEL. Run on 2026-08-21, with the outcomes written down beforehand:
+
+| variant | configuration | result |
+|---|---|---|
+| `lpddr3` | ours | **DRAM up**, `0x40000000` and `0x40100000` independent |
+| `lpddr4-upstream` | upstream's whole LPDDR4 block, verbatim | SPL hung in DRAM init |
+| `lpddr4-typeonly` | type swapped, every analog value unchanged | SPL hung in DRAM init |
+| `ddr3-typeonly` | same, DDR3-1333 | SPL hung in DRAM init |
+
+The two type-only rows are the tight ones. They change nothing but the
+protocol — same 672 MHz clock, same ODT, same drive strengths, same TPR words —
+and they turn a working DRAM init into a hang. A value that is never consulted
+cannot do that.
+
+`lpddr4-upstream` is the direct answer to the specification claim: it is the
+configuration upstream ships for the H700 Anbernic said to be identical
+hardware, at the same clock upstream pairs with it, and it does not train this
+memory. Meanwhile LPDDR3 does, and serves two addresses 1 MB apart
+independently. Since the two protocols are mutually unintelligible — different
+CA width, different signalling, different mode-register map, so a PHY set up
+for one cannot train the other at all — that settles the die and not merely the
+configuration.
+
+What none of this reads is the marking on the package. If a specification says
+LPDDR4 for this model, then either this unit is a revision that specification
+does not cover, or the specification is wrong; what is measured here is which
+protocol the memory speaks, which is the question a BSP is asking.
+
 If you ever doubt an inherited hardware parameter, that is the technique: a
 firmware known to boot the hardware is ground truth in a way a sibling
 board's defconfig is not. See the comment in `uboot/uboot.defconfig`, which
