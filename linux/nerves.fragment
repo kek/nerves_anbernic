@@ -102,6 +102,29 @@ CONFIG_IIO_MUX=y
 CONFIG_INPUT_JOYSTICK=y
 CONFIG_JOYSTICK_ADC=y
 
+# The power button, which Linux cannot currently see at all. It is not a GPIO:
+# the shell's button goes to the AXP717's PWRON pin, so without this driver
+# nothing in software ever learns it was pressed. Established by looking, on
+# 2026-08-22: /proc/bus/input/devices listed exactly four devices --
+# adc-joystick, gpio-keys-gamepad, gpio-keys-volume and the headphone jack --
+# and no power key; /proc/interrupts named every gpio-keys line and none for
+# power; and grepping this repository for AXP20X_PEK, power-key and KEY_POWER
+# found nothing, upstream's rg35xx DTS included.
+#
+# Nothing in the device tree needs to change, which is the part worth knowing.
+# drivers/mfd/axp20x.c already registers an "axp20x-pek" cell for the AXP717
+# with both PEK edge interrupts, and drivers/input/misc/axp20x-pek.c binds that
+# cell by platform_device_id -- so the only thing ever missing was the driver.
+# It reports KEY_POWER on an input device named "axp20x-pek".
+#
+# It also calls device_init_wakeup() and arms both PEK edges as wake sources,
+# which is the missing half of ever waking this board from suspend by pressing
+# something: today the only wakeup-capable devices are the RTC, the alarm timer
+# and USB, so a suspend that worked would look like a brick in someone's hand.
+#
+# =y for the reason above: no initramfs, and nothing modprobes anything.
+CONFIG_INPUT_AXP20X_PEK=y
+
 # Audio. The codec@5096000 node the board DTS enables is
 # "allwinner,sun50i-h616-codec", which sun4i-codec.c drives -- and which the
 # arm64 defconfig does not enable.
