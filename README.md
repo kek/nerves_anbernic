@@ -9,8 +9,8 @@ Allwinner H700 device.
 > dependency to add. Use a path or git dependency as shown below.
 
 **Confirmed working on a physical RG40XXV**: it boots, joins WiFi on 5 GHz,
-answers SSH over both WiFi and the USB-C cable, drives the 4" panel, and runs
-GLES2 on the Mali GPU.
+answers SSH over both WiFi and the USB-C cable, drives the 4" panel, runs
+GLES2 on the Mali GPU, and switches itself off when told to.
 
 | Feature              | Description                                          |
 | -------------------- | ---------------------------------------------------- |
@@ -23,6 +23,8 @@ GLES2 on the Mali GPU.
 | WiFi                 | RTL8821CS, mainline `rtw88_8821cs`                   |
 | Bluetooth            | RTL8821CS, `btrtl` + H5/3-wire                       |
 | Gamepad              | All buttons + volume keys as evdev                   |
+| Analog stick         | One, on the GPADC behind a 4:1 mux, with its click   |
+| Power                | Power key via `axp20x-pek`; AXP717 soft power-off    |
 | Battery / charger    | AXP717, via `/sys/class/power_supply`                |
 | Audio                | Speakers + headphone jack with detect                |
 | Display              | 4" 640×480 panel, DRM/KMS + framebuffer console      |
@@ -64,8 +66,8 @@ mix burn
 
 If `~/.nerves/artifacts` already holds a built `nerves_system_rg40xxv`, or a
 tagged release publishes one, `mix firmware` takes seconds. A machine that has
-to build the system from source is in for the better part of an hour and needs
-roughly 25 GB free.
+to build the system from source is in for a long build and needs roughly
+25 GB free.
 
 > [!IMPORTANT]
 > `mix nerves.new` also generates an `eth0` entry, which this device does not
@@ -177,25 +179,26 @@ soldering iron.
 
 - **No HDMI.** The SoC nodes are upstream but nothing here describes the
   connector.
-- **No software power-off.** `CONFIG_INPUT_AXP20X_PEK` is not set and no
-  power-key node exists, so Linux never sees the power button and holding it
-  does nothing. Press reset and pull the card. Fixable by enabling the PMIC
-  power key, or by mapping a gamepad combo (`/dev/input/event0` *is*
-  registered) to `Nerves.Runtime.poweroff/0`.
-- **Seven kernel patches are carried** in `patches/linux/`, none of them
-  upstream as of 6.18, so all need checking on a kernel bump. Two are
-  boot-critical fixes (`pwrseq_simple` GPIO reset, without which there is no
-  WiFi; and a sun4i USB phy fix, without which the gadget never enumerates);
-  five are the H616 display stack. See [the display notes](docs/display.md).
+- **Eight kernel patches are carried** in `patches/linux/`, none of them
+  upstream as of 6.18, so all need checking on a kernel bump. Three are fixes
+  found here (`pwrseq_simple` GPIO reset, without which there is no WiFi; a
+  sun4i USB phy fix, without which the gadget never enumerates; and an AXP717
+  soft power-off, without which shutdown falls through to PSCI and the board
+  reboots instead); five are the H616 display stack. See [the display
+  notes](docs/display.md).
 - **Two Buildroot patches** in `patches/buildroot/`, described in
   [`patches/buildroot/README.md`](patches/buildroot/README.md).
 - **`nerves_ssh` cannot generate host keys on OTP 29** (ssh 6.0.3): the daemon
   dies with `{:error, "No host key available"}` and then crashes in
   `:ssh_system_sup.stop_system(nil)`. Ship host keys in your application's
   `rootfs_overlay` and point `:nerves_ssh`'s `system_dir` at them.
-- **The button GPIO mapping is inherited**, not confirmed against this board.
-  It is the one remaining unexercised assumption; see
-  [verifying it on a device](docs/debugging.md#verifying-it-on-a-device).
+- **The analog stick's mux positions and axis polarity are inferred** from
+  mainline's `rg35xx-h.dts`, not measured on this board. The wiring is read
+  from muOS's vendor tree and the click is confirmed by pressing, but which
+  two of the four mux positions carry X and Y, and which way each axis runs,
+  are the one remaining unexercised assumption. The device tree says how to
+  settle it; see [verifying it on a
+  device](docs/debugging.md#verifying-it-on-a-device).
 
 ## Changing the system itself
 
@@ -212,7 +215,7 @@ mix compile          # builds via Docker on macOS, natively on Linux
 > **`mix compile` after a DTS edit ships the *previous* DTB**, with a fresh
 > checksum and a fresh firmware UUID to make it look convincing. This has
 > already put a wrong device tree on hardware once. [How to break
-> it](docs/hacking.md#editing-the-board-dts-does-not-rebuild-the-dtb).
+> it](docs/hacking.md#path-referenced-content-does-not-trigger-rebuilds).
 
 `mix precommit` runs the two cheap checks — formatting and
 `tools/check-consistency.sh`. It deliberately does not compile, because
@@ -232,6 +235,7 @@ failure it describes produced no error message anywhere.
 | [Debugging without a console](docs/debugging.md) | FEL, card breadcrumbs, and the on-device verification checklist |
 | [Hacking on the system](docs/hacking.md) | Kernel config regeneration, the DTB rebuild trap, the boot chain |
 | [DRAM verification](docs/dram-verification.md) | Why this board is LPDDR3, established four ways, and the one open question about the DRAM rail |
+| [Bluetooth](docs/bluetooth-notes.md) | The RTL8821CS config blob linux-firmware does not ship, and why `hci0` stayed behind looking healthy without it |
 
 ## Licensing and provenance
 

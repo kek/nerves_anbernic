@@ -81,11 +81,17 @@ Confirm it explicitly anyway:
 cmd "cat /proc/device-tree/model"     # => Anbernic RG40XX V
 ```
 
-## 4. Check the buttons — the least certain thing here
+## 4. Check the buttons, and then the stick — the least certain thing here
 
-The button GPIO mapping is inherited from mainline's `rg35xx-plus.dts` on
-the premise that the RG40XXV is the same board family. That is a reasonable
-inference, not a confirmed fact, so this is the check most likely to find
+The button GPIO mapping was inherited from mainline's `rg35xx-plus.dts` on the
+premise that the RG40XXV is the same board family, and it has since been
+exercised: every button drives a launcher on this hardware, and the stick's
+click was confirmed by pressing it.
+
+What is still inferred is the analog stick's axes. The mux wiring comes from
+muOS's vendor tree, but which two of the four mux positions carry X and Y, and
+which way round each axis runs, are taken from the two-stick sibling board.
+The stick check at the end of this section is the one most likely to find
 something.
 
 List what the kernel found:
@@ -117,6 +123,18 @@ Work through every button and check the reported codes match the physical
 layout. If they don't, the fix is small: the pins live in one `gpio-keys`
 node inherited from the parent DTS, and can be overridden in
 `linux/sun50i-h700-anbernic-rg40xx-v.dts`.
+
+Then settle the stick. All four mux positions are declared, so all four appear
+in sysfs — move the stick while reading them:
+
+```elixir
+cmd "cat /sys/bus/iio/devices/iio:device0/in_voltage0_raw"   # and 1, 2, 3
+```
+
+The two that move are the stick; which way each one travels gives the
+polarity, and the extremes give the real range in place of the nominal
+`0..4096` the device tree assumes. The `adc-joystick` comment in
+`linux/sun50i-h700-anbernic-rg40xx-v.dts` has the full account.
 
 ## 5. Everything else
 
