@@ -37,8 +37,8 @@ defmodule NervesSystemRG40XXV.MixProject do
   # looks for such an alias will run it instead of guessing.
   #
   # It deliberately does *not* compile. Compiling this project builds the whole
-  # system: `:nerves_package` is in `compilers`, so `mix compile` starts an
-  # hour-long Buildroot run in Docker whenever no cached artifact matches the
+  # system: `:nerves_package` is in `compilers`, so `mix compile` starts a
+  # full Buildroot run in Docker whenever no cached artifact matches the
   # checksum -- which is the case after any edit to `checksum_files()`. A
   # commit-time check that triggers that is unusable, and it fails for reasons
   # unrelated to the commit.
@@ -159,8 +159,8 @@ defmodule NervesSystemRG40XXV.MixProject do
   # not "what belongs in the package" but "what could change the built image".
   #
   # Anything listed here invalidates every published artifact when it changes,
-  # so a comment in nerves_defconfig costs three and a half hours -- correctly,
-  # because a comment there is indistinguishable to us from a real edit.
+  # so a comment in nerves_defconfig costs a full rebuild -- correctly, because
+  # a comment there is indistinguishable to us from a real edit.
   # Prose is distinguishable, and it is excluded below.
   defp checksum_files do
     [
@@ -185,7 +185,7 @@ defmodule NervesSystemRG40XXV.MixProject do
   end
 
   # Cannot affect a single byte of the image, so editing them must not throw
-  # away a 560 MB artifact and three and a half hours of CI.
+  # away a 560 MB artifact and a full CI rebuild.
   #
   # Built by addition rather than by subtracting from the package list, so that
   # renaming one of these cannot silently put it back into the checksum -- a

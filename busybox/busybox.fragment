@@ -8,8 +8,7 @@
 # which holds the DE MBUS clock and the DE->TCON mux -- has no such regmap, and
 # the vendor side of every comparison is read with busybox devmem anyway.
 #
-# See docs/superpowers/specs/2026-08-13-de33-register-decode.md for the
-# addresses this exists to read.
+# See docs/display.md for the addresses this exists to read.
 #
 # It reads and writes physical memory, so it is a debugging tool on a
 # development handheld rather than something to keep in a shipping image.

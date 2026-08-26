@@ -259,11 +259,12 @@
 	 * the polarity, and the extremes give the real range in place of the
 	 * nominal 0..4096 below.
 	 *
-	 * NOT ADDED: the stick click. The sibling board puts BTN_THUMBL on
-	 * PE8 and muOS's vendor tree calls that same pin "Key L3", so the line
-	 * is very likely there -- but nobody has pressed this stick down and
-	 * watched, and a gpio-keys entry for a switch that is not fitted is an
-	 * input that chatters rather than one that stays quiet.
+	 * THE CLICK is described, in a separate node further down: the stick on
+	 * this board is a button as well as an axis pair. The sibling board
+	 * puts BTN_THUMBL on PE8 and muOS's vendor tree calls that same pin
+	 * "Key L3", and pressing it here confirms the line is real. See the
+	 * gpio_keys_gamepad override below for why only the left one is
+	 * described.
 	 */
 	adc-joystick {
 		compatible = "adc-joystick";
