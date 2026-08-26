@@ -80,8 +80,8 @@ framebuffer, blender route, sizes — read correctly while the engine still did
 nothing.
 
 Decoding Allwinner's own sun50iw9 BSP is what converted "the screen is green"
-into a one-register boolean; see [the DE33 register
-decode in the project journal (`de33-register-map.md`). Once
+into a one-register boolean; the DE33 register decode lives in the project
+journal as `de33-register-map.md`. Once
 `0x1008104` was known to be the frame-end latch, the question became "why does
 this engine never finish a frame" — and an engine wired to a TCON that is not
 driving the panel never will.
@@ -335,10 +335,9 @@ System.cmd("/sbin/devmem", ["0x11C1010", "32"])   # UI layer 0 framebuffer addre
 nerves-common's busybox config turns it off, and its absence is what stopped a
 debugging session. Registers owned by a driver can also be read through
 `/sys/kernel/debug/regmap/1100000.mixer-{layers,top,display}`, but the DE clock
-window at `0x1008000` has no regmap, so `devmem` is the only way to see it.
-[The DE33 register
-decode in the project journal (`de33-register-map.md`) lists the
-addresses worth reading, with the values to expect.
+window at `0x1008000` has no regmap, so `devmem` is the only way to see it. The project journal's
+`de33-register-map.md` lists the addresses worth reading, with the values to
+expect.
 
 `modetest` needs stdin held open or it drops the mode as it exits:
 

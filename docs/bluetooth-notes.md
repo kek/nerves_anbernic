@@ -29,7 +29,7 @@ Confirmed on hardware after the fix:
 
 ## The controller answers, and the numbers prove the firmware is running
 
-`ScenicRg40xxv.Diagnostics.probe_bluetooth/0` binds an `HCI_CHANNEL_USER`
+`MayonnaiOS.Diagnostics.probe_bluetooth/0` binds an `HCI_CHANNEL_USER`
 socket to `hci0` and issues Reset then Read Local Version. On this board:
 
     manufacturer: 93 (0x5D, Realtek)   hci_version: 8   lmp_version: 8
@@ -69,7 +69,7 @@ Audio ISO sockets — hangs off `BT_LE`. LE advertising and connections are
 present.
 
 It matters less still for how this device is driven.
-`ScenicRg40xxv.Bluetooth.HCISocket` in the application binds an `AF_BLUETOOTH`
+`MayonnaiOS.Bluetooth.HCISocket` in the application binds an `AF_BLUETOOTH`
 `HCI_CHANNEL_USER` socket to `hci0` and speaks raw HCI, bypassing the kernel's
 Bluetooth stack entirely. The only kernel code in that path is `hci_sock.c`
 plus the `hci_uart`/`btrtl` serdev driver.
@@ -77,10 +77,10 @@ plus the `hci_uart`/`btrtl` serdev driver.
 So: left alone deliberately, and documented so nobody spends a rebuild
 discovering the same thing.
 
-## Still missing
+## No BlueZ, on purpose
 
-No BlueZ in the image — no `hciconfig`, `bluetoothctl`, `btmgmt` or
-`btattach`. That is intentional: the application talks HCI directly rather
-than pulling in D-Bus. Nothing has yet confirmed the controller *answers*,
-as opposed to having had firmware uploaded to it at boot; that is what
-`ScenicRg40xxv.Diagnostics.probe_bluetooth/0` is for.
+There is no BlueZ in the image — no `hciconfig`, `bluetoothctl`, `btmgmt` or
+`btattach`. The application talks HCI directly rather than pulling in D-Bus;
+`MayonnaiOS.Diagnostics.probe_bluetooth/0` is the tool that confirms the
+controller *answers*, as distinct from having had firmware uploaded to it at
+boot.

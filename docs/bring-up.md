@@ -26,15 +26,11 @@ Everything since done to that claim — verifying it on the hardware four
 independent ways, correcting an "LPDDR4 family" label that turns out to be
 secondhand everywhere it appears, and one open question about the DRAM rail
 voltage that matters more than the type ever did — lives in
-**[dram-verification.md](dram-verification.md)**. Two results from there change
-how this section should be read:
-
-- The finding is about **this unit**, not the model. ROCKNIX ships both an
-  LPDDR3 and an LPDDR4 U-Boot for the H700 and chooses between them per unit by
-  reading a regulator, so model identity does not predict the memory type.
-- This heading read "The board is LPDDR3" for ten days, on the strength of
-  documentation written during bring-up by the same author as the claim. The
-  correction was to the scope, not the answer.
+**[dram-verification.md](dram-verification.md)**. One result from there changes
+how this section should be read: the finding is about **this unit**, not the
+model. ROCKNIX ships both an LPDDR3 and an LPDDR4 U-Boot for the H700 and
+chooses between them per unit by reading a regulator, so model identity does
+not predict the memory type.
 
 If you ever doubt an inherited hardware parameter, that is the technique: a
 firmware known to boot the hardware is ground truth in a way a sibling board's
