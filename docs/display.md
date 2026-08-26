@@ -107,18 +107,16 @@ Two `dtc` warnings are expected, and `tools/check-dts-inner.sh` says which:
 `graph_child_address` on tcon-top's `port@1` is ours and deliberate — see the
 note in the DTS.
 
-## This is a smaller job than it used to be
+## Five patches, not ROCKNIX's twenty-three
 
-The design notes and the older README said "roughly 23 kernel patches",
-following ROCKNIX. That is out of date. **6.18.44 already carries the H616
-DE33 mixer and its clocks** — `allwinner,sun50i-h616-de33-mixer-0` and
-`-de33-clk` are upstream, and `sun8i-mixer` was already being built before
-any of this. What is genuinely missing upstream is the TCON support, the panel
-driver, and the device tree.
+ROCKNIX carries roughly 23 kernel patches for this display; this tree needs
+five, because **6.18.44 already carries the H616 DE33 mixer and its clocks** —
+`allwinner,sun50i-h616-de33-mixer-0` and `-de33-clk` are upstream, and
+`sun8i-mixer` is built regardless. What is genuinely missing upstream is the
+TCON support, the panel driver, and the device tree.
 
-So this tree carries **five** display patches, not seven and not twenty-three,
-in `patches/linux/0100`–`0104`. Each has a header explaining its upstream
-status.
+The five patches are `patches/linux/0100`–`0104`. Each has a header explaining
+its upstream status.
 
 ROCKNIX also carries a *newer* refactor that moves plane handling out of the
 mixer into a separate `sun50i_planes` driver. That is deliberately **not**

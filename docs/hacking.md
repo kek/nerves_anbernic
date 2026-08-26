@@ -37,15 +37,15 @@ printf 'REUSE.toml\n'       | .github/scripts/build-needed.sh mix.exs   # true
 
 `REUSE.toml` *is* in `checksum_files()`, and CI runs `reuse lint`, which needs
 every file in the repository to carry copyright and licence information —
-whether or not it ships. Those two facts used to collide: adding a document
-under `docs/` cost nothing, but recording its licence cost a full rebuild for
-one annotation.
+whether or not it ships. Those two facts would collide if each document were
+enumerated by name: adding a document under `docs/` costs nothing, but an edit
+to `REUSE.toml` costs a full rebuild for one annotation.
 
-`REUSE.toml` now globs `docs/**` as CC-BY-4.0, so **a new document is licensed
-the moment it is created** and no edit here is needed. Add prose freely. The
-glob only became safe once `docs/superpowers/` was deleted: while part of the
-directory was CC0, a glob risked relicensing it silently, which is why the
-documents were enumerated by name before.
+So `REUSE.toml` globs `docs/**` as CC-BY-4.0, and **a new document is licensed
+the moment it is created** with no edit here. Add prose freely. The glob is
+safe only while everything under `docs/` really is CC-BY-4.0: a subdirectory
+under a different licence would be silently relicensed by it, and would force
+the documents back to being enumerated by name.
 
 Worth being clear about what is and is not required, since it is easy to
 overestimate. Nothing about the licence is needed for distribution — `docs/` is

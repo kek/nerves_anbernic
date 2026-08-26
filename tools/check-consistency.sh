@@ -213,18 +213,13 @@ done
 
 # The display stack is built in and the panel description is embedded.
 #
-# This inverts what these two checks asserted until 2026-08-17, and the old
-# reasoning is kept because it was right about everything except its
-# conclusion. The panel driver was a module loaded by erlinit, because built
-# in it would call request_firmware() during initcalls -- before the rootfs is
-# mounted -- and fail with -2, leaving no /sys/class/drm/card0 at all. That
-# was established on hardware, not guessed.
-#
-# What changed is CONFIG_EXTRA_FIRMWARE, which links the blob into the kernel
-# image so request_firmware() is answered from the built-in table with no
-# filesystem involved. The failure the old comment describes is exactly the one
-# it removes, so "cannot be built in" was really "cannot be built in while the
-# firmware lives on the rootfs".
+# Built in only works together with CONFIG_EXTRA_FIRMWARE. Without it, a
+# built-in panel driver calls request_firmware() during initcalls -- before
+# the rootfs is mounted -- and fails with -2, leaving no /sys/class/drm/card0
+# at all; established on hardware, not guessed. CONFIG_EXTRA_FIRMWARE links
+# the blob into the kernel image so request_firmware() is answered from the
+# built-in table with no filesystem involved: "cannot be built in" is really
+# "cannot be built in while the firmware lives on the rootfs".
 #
 # It has to be the whole stack, not just the panel: Kconfig silently demotes a
 # =y symbol whose subsystem is =m, so CONFIG_DRM_PANEL_MIPI=y alone came back
@@ -236,8 +231,8 @@ if grep -q '^CONFIG_DRM_PANEL_MIPI=y' linux/linux-6.18.defconfig; then
     ok "the panel driver is built in"
 else
     fail "CONFIG_DRM_PANEL_MIPI must be =y, with its blob in CONFIG_EXTRA_FIRMWARE."
-    fail "As a module nothing loads it: it cannot autoload, and erlinit no longer"
-    fail "modprobes it. Check CONFIG_DRM is =y too -- Kconfig demotes it silently."
+    fail "As a module nothing loads it: it cannot autoload, and erlinit does not"
+    fail "modprobe it. Check CONFIG_DRM is =y too -- Kconfig demotes it silently."
 fi
 
 if grep -q '^CONFIG_DRM=y' linux/linux-6.18.defconfig; then

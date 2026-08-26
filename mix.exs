@@ -4,8 +4,7 @@ defmodule NervesSystemRG40XXV.MixProject do
   @github_organization "kek"
   @app :nerves_system_rg40xxv
   # The repository is named after the system, so both this and artifact_sites
-  # below are derived from @app rather than spelled out. They were out of step
-  # until the repository was renamed from nerves_anbernic, and a stale
+  # below are derived from @app rather than spelled out. A stale
   # artifact_sites entry is not loud about it: builds just look for prebuilt
   # artifacts in a repository that does not exist and fall back to building
   # from source.

@@ -22,15 +22,15 @@
 # match that happened is reported as a miss.
 #
 # That only fires when tar still has substantial output to write *after* the
-# match. The first version of `good_rootfs` put its filler in files that sorted
-# *before* usr/bin/kmscube, so the match landed on the very last entry, tar had
-# nothing left to write, no SIGPIPE, and the fixture passed the buggy code --
-# a self-test that would have certified the exact bug it was written to catch.
+# match. Filler that sorted *before* usr/bin/kmscube would land the match on
+# the very last entry: tar has nothing left to write, no SIGPIPE, and the
+# fixture passes the buggy code -- a self-test certifying the exact bug it was
+# written to catch.
 #
 # So the filler lives under ./var/, which sorts after ./usr/bin/kmscube, and
-# `test_fixture_reproduces_the_pipe_trap` asserts that the old idiom really
-# does fail on it. If that assertion ever passes the old idiom, the fixture has
-# stopped testing anything and says so.
+# `test_fixture_reproduces_the_pipe_trap` asserts that the buggy idiom really
+# does fail on it. If that assertion ever passes the buggy idiom, the fixture
+# has stopped testing anything and says so.
 #
 # Pure shell, no Docker, no network. Note that it is only meaningful on a tar
 # that dies on SIGPIPE: macOS bsdtar and Homebrew's GNU tar do not, so the
@@ -59,10 +59,9 @@ skip() { echo "  skipped  $1"; }
 make_rootfs() { # make_rootfs <dest.tar> <with_kmscube:yes|no>
     local dest=$1 with=$2 cached="$work/cache-rootfs-$2.tar"
 
-    # Built once per variant and copied thereafter. The first version rebuilt
-    # it for every fixture -- eight tarballs, thousands of files each -- and
-    # took minutes. This runs in the cheap job whose entire purpose is fast
-    # feedback, so it has to actually be fast.
+    # Built once per variant and copied thereafter: rebuilding it for every
+    # fixture -- eight tarballs, thousands of files each -- takes minutes, and
+    # this runs in the cheap job whose entire purpose is fast feedback.
     if [ ! -f "$cached" ]; then
         local root="$work/rootfs-src-$2" list="$work/list-$2"
         mkdir -p "$root/usr/bin" "$root/var"

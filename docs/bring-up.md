@@ -59,12 +59,12 @@ loops — present and configured but never reachable.
 
 ## 4. The LED is a charge indicator, not a boot signal
 
-An earlier version of the documentation offered an LED-based triage tree on the
-reasoning that `CONFIG_SPL_SUNXI_LED_STATUS_GPIO=268` (PI12) is the power LED,
-so the SPL lights it before Linux. That reasoning is sound but the conclusion is
-not: on real hardware the LED glows a steady yellow whenever the device has
-power, because it is the AXP717's charge indicator, so it looks identical
-whether the device booted or is wedged.
+It is tempting to build an LED-based triage tree on the reasoning that
+`CONFIG_SPL_SUNXI_LED_STATUS_GPIO=268` (PI12) is the power LED, so the SPL
+lights it before Linux. The reasoning is sound but the conclusion is not: on
+real hardware the LED glows a steady yellow whenever the device has power,
+because it is the AXP717's charge indicator, so it looks identical whether the
+device booted or is wedged.
 
 **Do not read anything into the LED at power-on.**
 

@@ -201,11 +201,10 @@ else
     rc=1
 fi
 
-# Display pipeline. This board is no longer headless; what used to be a
-# trip-wire against any panel node is now a check that the whole chain is
-# present, because a partial pipeline is the failure mode that looks like a
-# hardware problem. Every link below is one that produces "no picture, no
-# error" when it is missing.
+# Display pipeline. The whole chain is checked, not just the panel node,
+# because a partial pipeline is the failure mode that looks like a hardware
+# problem. Every link below is one that produces "no picture, no error" when
+# it is missing.
 assert_match "display-engine present" 'allwinner,sun50i-h616-display-engine'
 assert_match "DE33 bus present" 'allwinner,sun50i-h616-de33'
 assert_match "DE33 clocks present" 'allwinner,sun50i-h616-de33-clk'

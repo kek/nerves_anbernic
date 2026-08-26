@@ -175,8 +175,7 @@ CONFIG_SPI_GPIO=y
 # filesystem and modprobed it, which put the first possible pixel about ten
 # seconds in. Built in, probe happens during initcalls.
 #
-# Autoloading is no longer a consideration, but the note is kept because it is
-# the reason this cannot simply go back to being a module that loads itself:
+# Autoloading is the other reason this cannot be a module that loads itself:
 # the SPI core derives a modalias from the first compatible string minus its
 # vendor prefix, so this panel announces itself as "spi:rg40xx-v2-panel" while
 # the driver advertises panel-mipi-dpi-spi, and nothing matches. Reordering the
