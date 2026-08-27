@@ -282,3 +282,50 @@ CONFIG_USB_MUSB_GADGET=y
 # (fs/exfat/super.c). CONFIG_NLS_CODEPAGE_437 is already set by the arm64
 # defconfig and covers that case anyway.
 CONFIG_EXFAT_FS=y
+
+# CPU frequency scaling, which this board has none of.
+#
+# Read off the device on firmware 3cc86f59, at rest:
+#
+#     /sys/devices/system/cpu/cpufreq            empty -- no policy at all
+#     /sys/class/thermal                         four zones, zero cooling devices
+#     /sys/devices/system/cpu/cpuidle/current_driver   none
+#
+# So the cores run at whatever frequency and voltage U-Boot left them at,
+# for as long as the device is on: in a game, at idle, and behind a dark
+# backlight. Nothing can throttle them either, because a cooling device for
+# cpu-thermal is registered by cpufreq-dt and by nothing else -- the four
+# thermal zones have a step_wise governor and no lever to pull.
+#
+# The missing piece is only the driver. Everything the OPP table needs is
+# already in place: /proc/device-tree/opp-table-cpu/compatible reads
+# "allwinner,sun50i-h616-operating-points", cpu@0 carries both
+# operating-points-v2 and cpu-supply, and the eFuse the driver reads the
+# speed grade out of is present as /sys/bus/nvmem/devices/sunxi-sid0.
+#
+# That compatible is the whole reason CPUFREQ_DT alone is not enough.
+# cpufreq-dt-platdev.c binds "operating-points-v2" tables; this one is the
+# Allwinner variant, and drivers/cpufreq/sun50i-cpufreq-nvmem.c is what
+# reads the speed grade, sets the opp-supported-hw mask and only then
+# registers the cpufreq-dt device. Without it, no device is ever created and
+# there is no policy for a governor to attach to.
+#
+# =y rather than =m for the reason the panel and exFAT are: no initramfs,
+# and nothing modprobes anything. The module is built and shipped today --
+# /lib/modules/6.18.44/kernel/drivers/cpufreq/sun50i-cpufreq-nvmem.ko is on
+# the device -- and has never once been loaded.
+CONFIG_ARM_ALLWINNER_SUN50I_CPUFREQ_NVMEM=y
+
+# The powersave governor, for the same reason and to the same end.
+#
+# The arm64 defconfig leaves this =m, and a governor that cannot be loaded
+# is a governor that cannot be selected: writing "powersave" to
+# scaling_governor returns EINVAL unless it is already registered. The
+# application wants it while the panel is dark, so it has to be built in.
+#
+# ONDEMAND and USERSPACE are already =y in the arm64 defconfig and are not
+# restated here. The default governor is left wherever Kconfig puts it:
+# savedefconfig omits CONFIG_CPU_FREQ_DEFAULT_GOV_* entirely, which means
+# the base config takes the choice's default, and picking a different one
+# is a separate decision from having any governors at all.
+CONFIG_CPU_FREQ_GOV_POWERSAVE=y
