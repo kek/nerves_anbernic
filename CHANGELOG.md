@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+**The app partition's first mount no longer discards.** `f2fs` turns discard
+on by default when the device claims support, and this card times out on
+erase (`mmc_erase: group start error -110`) -- the same symptom
+`MayonnaiOS.AppPartition` remounts around at the application layer, once
+Elixir is up, because that ships without a rebuild. `erlinit.config`'s `-m`
+now mounts `/root` `nodiscard` from the start, which also removes discard
+from the ~3 second window `docs/display.md`'s boot trace attributes to the
+initial mount of that partition (2.78s to 5.73s) -- unconfirmed on hardware,
+since nothing here changes the mount itself, only whether it discards.
+
 **The power button reaches Linux, and power off now powers off.** Two separate
 absences, either of which alone left the same symptom.
 
