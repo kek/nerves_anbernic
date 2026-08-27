@@ -97,6 +97,7 @@ required="
   USB_MUSB_HDRC USB_MUSB_SUNXI USB_GADGET USB_CONFIGFS
   USB_CONFIGFS_ECM USB_CONFIGFS_ACM SND_SUN4I_CODEC
   DRM DRM_SUN4I DRM_SUN8I_MIXER DRM_SUN8I_TCON_TOP DRM_PANEL_MIPI
+  DRM_SUN8I_DW_HDMI
 "
 # Present but not fatal. The README describes these as working, so a
 # regression should be visible, but they do not stop a boot.

@@ -95,27 +95,28 @@ The pipeline is:
 
 ```
 mixer0 -> tcon_top -> tcon_lcd0 -> panel   (RGB888 pixels + SPI init sequence)
+                   \-> tcon_tv0  -> hdmi -> mini-HDMI connector
 ```
+
+The second branch has never been tested; see [HDMI](#hdmi).
 
 Verified in the build: the patch series applies cleanly to 6.18.44 in the real
 Buildroot flow; the kernel builds; the DTB compiles and passes every pipeline
 assertion in `tools/check-dts.sh`; and both panel blobs are installed in the
 target rootfs.
 
-Two `dtc` warnings are expected, and `tools/check-dts-inner.sh` says which:
-`unit_address_vs_reg` on `/soc` comes from mainline's dtsi, and
-`graph_child_address` on tcon-top's `port@1` is ours and deliberate — see the
-note in the DTS.
+One `dtc` warning is expected, and `tools/check-dts-inner.sh` says which:
+`unit_address_vs_reg` on `/soc`, which comes from mainline's dtsi.
 
-## Five patches, not ROCKNIX's twenty-three
+## Six patches, not ROCKNIX's twenty-three
 
 ROCKNIX carries roughly 23 kernel patches for this display; this tree needs
-five, because **6.18.44 already carries the H616 DE33 mixer and its clocks** —
+six, because **6.18.44 already carries the H616 DE33 mixer and its clocks** —
 `allwinner,sun50i-h616-de33-mixer-0` and `-de33-clk` are upstream, and
 `sun8i-mixer` is built regardless. What is genuinely missing upstream is the
-TCON support, the panel driver, and the device tree.
+TCON support, the HDMI PHY, the panel driver, and the device tree.
 
-The five patches are `patches/linux/0100`–`0104`. Each has a header explaining
+The six patches are `patches/linux/0100`–`0105`. Each has a header explaining
 its upstream status.
 
 ROCKNIX also carries a *newer* refactor that moves plane handling out of the
@@ -244,6 +245,7 @@ and the patch numbers are otherwise only findable by reading ROCKNIX's tree:
 
 | Patch | What it was for |
 |---|---|
+| `0002-rg35xx-enable-HDMI-LCD.patch` | Jernej Skrabec's 21-patch H616 display series, carried downstream. `0100` and `0105` are drawn from it |
 | `0003-Update-sun8i_tcon_top.c.patch` | TCON top |
 | `0008-…introduce_allwinner_h616_pwm_controller.patch` | H616 PWM controller — upstream submission in flight |
 | `0010-rg35xx-enable-pwm-backlight.patch` | PWM backlight, not taken; see the backlight section |
@@ -251,6 +253,7 @@ and the patch numbers are otherwise only findable by reading ROCKNIX's tree:
 | `0111-rg35xx-2024-use-panel-mipi-dpi-spi-driver.patch` | Adds the `panel-mipi-dpi-spi` fallback compatible |
 | `0151-phy-fix-OTG-host-mode.patch` | The OTG phy, which turned out to matter for USB rather than display |
 | `0155-sun4i-set-rgb-connector-as-DSI.patch` | sun4i RGB connector treated as DSI |
+| `0203-…h616-ahub.patch.disabled` / `0204-dts-Enable-hdmi-sound.patch` | HDMI audio through Allwinner's audio hub. Not taken — ROCKNIX ships the driver half disabled, and it has never been submitted upstream |
 
 Deliberately not taken: `0140-rg35xx-2024-use-rocknix-joypad-driver.patch` and
 its friends pull in an out-of-tree joypad driver, and `0127-enable-mmc1-*` is
@@ -292,9 +295,109 @@ itself can unbind fbcon by writing `0` to
 `/sys/class/vtconsole/vtcon*/bind` for the console whose `name` contains
 "frame buffer". The messages still reach `ttyS0` and `dmesg`.
 
-HDMI is still not described. The SoC nodes exist upstream and ROCKNIX
-describes the connector, but nothing here needs it and every node left out is
-one that cannot fail.
+## HDMI
+
+> [!WARNING]
+> **Never tested on hardware.** Nothing in this tree has ever driven the
+> mini-HDMI port. What follows is described, compiled and asserted; it is not
+> observed. Flash it on a slot you are willing to lose and do not `VALIDATE`
+> until you have seen the panel come up.
+
+The port is a mini-HDMI socket on the top edge, wired to the H700's own
+Synopsys DesignWare transmitter — there is no external bridge chip, so the
+"connector fitted but no transmitter behind it" failure some handhelds have
+does not apply here. Both the stock firmware and muOS drive it; muOS caps at
+720p and calls 1080p unstable. The path is:
+
+```
+mixer0 -> tcon_top -> tcon_tv0 -> hdmi -> connector
+```
+
+which is the panel's path with `tcon_lcd0` swapped for `tcon_tv0`.
+
+### What it took
+
+Almost nothing on the driver side, because the TCON half was already here for
+the panel. `patches/linux/0105` is the only new code: a PHY configuration
+table for five pixel clocks up to 594 MHz and one `of_device_id` entry.
+Everything else was already satisfied —
+
+- `sun8i_dw_hdmi.c` needs no change. The controller node claims
+  `allwinner,sun50i-h616-dw-hdmi` first but matches on the
+  `allwinner,sun50i-h6-dw-hdmi` fallback, and the H6 quirks are the correct
+  ones.
+- The `allwinner,sun50i-h616-tcon-tv` quirks, including the `hdmi_pad` bit
+  that connects the TCON's output to the transmitter, came in with `0100`
+  along with the TCON LCD support the panel needed.
+- Every clock and reset the nodes reference — `CLK_HDMI`, `CLK_HDCP`,
+  `RST_BUS_HDMI_SUB`, `CLK_BUS_TCON_TV0` and the rest — is already in
+  6.18.44's H616 CCU headers.
+
+`CONFIG_DRM_SUN8I_DW_HDMI` goes to `=y` for the reason the whole stack is
+built in: `hdmi@6000000` is in the display graph, so sun4i-drm counts it as a
+component and will not finish binding until it registers.
+
+### What a mainline kernel gets elsewhere
+
+Worth recording, because it says both that this is achievable and that it is
+still nobody's upstream:
+
+- ROCKNIX has run HDMI on this SoC family since a May 2025 pull request, and a
+  hands-on writeup of an RG40XX V on a ROCKNIX nightly reports the port
+  working at **1280×720**, with the display plugged in before power-on.
+- ROCKNIX's H700 target is on **mainline 7.2**, and it still carries the same
+  HDMI PHY patch. Checked against Torvalds' master: `sun8i_hdmi_phy.c` has no
+  H616 variant there either. So this is not a patch that goes away on the next
+  kernel bump — it goes away when Jernej's series lands, which the DE33
+  refactor is still ahead of.
+- The same 7.2-era ROCKNIX now ships its HDMI *audio* driver disabled, so
+  HDMI audio is dormant downstream too and not just absent here.
+
+### The panel and HDMI cannot both be on
+
+Not a policy, a consequence. DE33 has two mixers, and this tree can only
+instantiate one.
+
+Upstream's DE33 mixer binding claims the plane register block at `0x100000` as
+the mixer's own `reg` index 0, and takes it with
+`devm_platform_ioremap_resource()` — an exclusive request. But on DE33 that
+block is *shared* by both mixers; it is not per-mixer the way it was on DE2. So
+a `mixer1` node pointing at the same window fails with `-EBUSY`, and pointing
+it anywhere else describes registers that are not there. The refactor that
+fixes this — a separate planes driver both mixers reference — is exactly the
+series still in review on dri-devel, and adopting ROCKNIX's copy of it means
+reverting the DE33 plane code 6.18.44 already has. See [Five patches, not
+ROCKNIX's twenty-three](#five-patches-not-rocknixs-twenty-three).
+
+With one mixer and two TCONs, both CRTCs resolve to `mixer0`, and
+`TCON_TOP_PORT_SEL`'s DE0 field names one TCON at a time. Enabling both CRTCs
+is therefore not mirroring — it is two sets of DRM planes writing one set of
+channel registers. **Expect one output at a time**, and expect a plugged-in
+HDMI cable at boot to be a plausible cause if the panel misbehaves: DRM's
+fbdev client tries to light every connected connector it finds.
+
+### No sound
+
+Picture only. HDMI audio on H616 runs through Allwinner's audio hub (AHUB),
+whose driver — `allwinner,sunxi-snd-plat-ahub` — has never been submitted
+upstream. ROCKNIX carries one and ships it **disabled**
+(`0203-sound-soc-Add-sunxi_v2-for-h616-ahub.patch.disabled`), with the device
+tree half in `0204-dts-Enable-hdmi-sound.patch`. `#sound-dai-cells` is on the
+`hdmi` node because the binding asks for it, not because anything can use it.
+
+### If it does not work
+
+The failure that matters most is not "no HDMI" — it is **no display at all**,
+including the panel. sun4i-drm is a component master, `hdmi@6000000` and
+`lcd-controller@6515000` are now components of it, and a component that never
+binds holds up the whole device. So:
+
+| Observation | Meaning |
+|---|---|
+| No `/sys/class/drm/card0` at all, panel dark | An HDMI-side component did not bind. Check `dmesg` for `hdmi-phy` and `sun8i-dw-hdmi`; if the PHY compatible went unmatched, `patches/linux/0105` did not apply |
+| `card0` exists, panel fine, no HDMI connector listed | The controller bound but the graph did not reach the connector. Check `/sys/class/drm/` for a `card0-HDMI-A-1` |
+| HDMI connector present, always `disconnected` | Hotplug detect. HPD and DDC are inside the controller on this SoC, not GPIOs, so this points at the controller's own power rather than wiring |
+| HDMI connector `connected`, black screen | The PHY. The board describes no `hvcc-supply`, because the AXP717's `aldo1`/`aldo2`/`aldo3` are all marked unused upstream and ROCKNIX ships its own `hvcc-supply` commented out — HDMI works downstream without it, so the rail is evidently on by PMIC default. `devm_regulator_get()` falls back to a dummy regulator, so an unpowered HDMI I/O rail would look exactly like this. `aldo1` is the first thing to try, since it is the one Ryan Walklin guessed at |
 
 ## Reading a screen that is wrong
 

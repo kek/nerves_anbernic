@@ -35,11 +35,11 @@ cpp -nostdinc -I scripts/dtc/include-prefixes -undef -D__DTS__ \
     "arch/arm64/boot/dts/${DTS_NAME}.dts"
 
 echo "==> dtc"
-# Two warnings are expected. unit_address_vs_reg on /soc comes from mainline's
-# sun50i-h616.dtsi, not from us. graph_child_address on tcon-top's port@1 is
-# ours and is deliberate: see the note in the DTS: the cells look unnecessary
-# to dtc because the port has one child, but dropping them makes dtc inherit
-# <2>/<1> from /soc and emit six warnings instead of one.
+# One warning is expected: unit_address_vs_reg on /soc, which comes from
+# mainline's sun50i-h616.dtsi and not from us. The graph_child_address warning
+# on tcon-top's port@1 that used to be expected here is gone -- that port has
+# two endpoints now that tcon_tv0 is wired up, which is exactly the condition
+# the note in the DTS said would clear it.
 dtc -I dts -O dtb -i arch/arm64/boot/dts -i arch/arm64/boot/dts/allwinner \
     -o /tmp/board.dtb /tmp/board.dts.tmp
 
@@ -263,6 +263,47 @@ fi
 # The parallel RGB pinmux. Without it the TCON drives nothing, and bank D has
 # no supply by default because nothing used it before the display.
 assert_match "RGB888 pinmux present" 'function = "lcd0"'
+
+# The HDMI branch. Every node below is a component of the same sun4i-drm
+# master the panel hangs off, so a half-described HDMI path does not fail
+# quietly to HDMI -- it stops the master binding and takes the panel with it.
+assert_match "HDMI controller present" 'allwinner,sun50i-h616-dw-hdmi'
+assert_match "HDMI controller falls back to the H6 quirks" \
+    'allwinner,sun50i-h6-dw-hdmi'
+assert_match "HDMI PHY present" 'allwinner,sun50i-h616-hdmi-phy'
+assert_match "TCON TV0 present" 'allwinner,sun50i-h616-tcon-tv'
+assert_match "HDMI connector present" 'compatible = "hdmi-connector"'
+
+# TCON TOP's second output endpoint, and the same reg-is-a-TCON-index rule as
+# above: 2 is TCON TV0. Wrong here and HDMI is routed to a TCON that is not
+# on the transmitter, which is the failure that shows nothing and logs
+# nothing.
+tv_ep_reg=$(fdtget /tmp/board.dtb \
+    /soc/tcon-top@6510000/ports/port@1/endpoint@2 reg 2>/dev/null || echo MISSING)
+if [ "$tv_ep_reg" = "2" ]; then
+    echo "  ok       TCON TOP HDMI endpoint is reg = <2>, routing mixer0 to TCON TV0"
+else
+    echo "  FAILED   TCON TOP HDMI endpoint reg is '$tv_ep_reg', wanted 2."
+    rc=1
+fi
+
+# One input endpoint per TCON, and this is load-bearing rather than tidiness.
+# sun4i_tcon_find_engine() switches strategy when a TCON's input port has more
+# than one child: it stops traversing the graph and matches engine ids against
+# the TCON's index in the driver's list. This tree has one mixer and two TCONs,
+# so the second lookup would ask for engine id 1, find none, and fail the
+# component master -- panel included.
+for tcon in lcd-controller@6511000 lcd-controller@6515000; do
+    n=$(fdtget -l /tmp/board.dtb "/soc/$tcon/ports/port@0" 2>/dev/null | wc -l)
+    if [ "$n" -eq 1 ]; then
+        echo "  ok       $tcon has exactly one input endpoint"
+    else
+        echo "  FAILED   $tcon has $n input endpoints, wanted 1. More than one"
+        echo "           sends sun4i_tcon_find_engine() down the id-matching"
+        echo "           path, which cannot work with a single mixer."
+        rc=1
+    fi
+done
 
 echo
 if [ "$rc" -eq 0 ]; then

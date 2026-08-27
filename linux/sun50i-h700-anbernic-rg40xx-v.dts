@@ -33,16 +33,28 @@
  * failure than a merge conflict in a file we own, and keeping it here
  * means tools/check-dts.sh sees the whole pipeline as source.
  *
- * The pipeline is deliberately single-path:
+ * There are two output paths, and they share one display engine:
  *
- *     mixer0 -> tcon_top -> tcon_lcd0 -> panel (RGB888 + SPI init)
+ *     mixer0 -> tcon_top -> tcon_lcd0 -> panel  (RGB888 + SPI init)
+ *                        \-> tcon_tv0 -> hdmi -> mini-HDMI connector
  *
- * No mixer1, no tcon_tv0, no HDMI. Those exist on the SoC and ROCKNIX
- * describes them, but every node on the list above is on the way to
- * pixels and none of the omitted ones are. Add them when something
- * needs them, not before.
+ * There is no mixer1. That is not an omission, it is what 6.18.44
+ * allows: DE33's plane registers are a single block at 0x100000 shared
+ * by both mixers, upstream's mixer binding claims that block as the
+ * mixer's own reg index 0 with devm_platform_ioremap_resource(), and a
+ * second mixer node asking for the same window fails with -EBUSY. The
+ * split that makes two mixers possible -- a separate planes driver both
+ * mixers point at -- is exactly the refactor still in review on
+ * dri-devel, and taking it would mean reverting the DE33 plane code
+ * 6.18.44 already has. See docs/display.md.
  *
- * The drivers this needs are in patches/linux/0100..0103. 6.18.44
+ * The consequence is a hard one and worth stating in the device tree
+ * rather than only in prose: THE PANEL AND HDMI CANNOT BE ON AT THE
+ * SAME TIME. Both CRTCs resolve to mixer0, TCON_TOP_PORT_SEL routes
+ * that mixer to one TCON at a time, and lighting both is not mirroring
+ * -- it is two CRTCs writing one set of channel registers.
+ *
+ * The drivers this needs are in patches/linux/0100..0105. 6.18.44
  * already has the DE33 mixer and its clocks, so the mixer node follows
  * upstream's binding -- reg-names "layers", "top", "display" -- and not
  * ROCKNIX's, which splits the layer registers into a separate planes@
@@ -52,6 +64,7 @@
 #include "allwinner/sun50i-h700-anbernic-rg35xx-plus.dts"
 
 #include <dt-bindings/clock/sun8i-de2.h>
+#include <dt-bindings/clock/sun8i-tcon-top.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/leds/common.h>
@@ -100,6 +113,29 @@
 		compatible = "gpio-backlight";
 		gpios = <&pio 3 28 GPIO_ACTIVE_HIGH>; /* PD28 */
 		default-on;
+	};
+
+	/*
+	 * The mini-HDMI socket on the top edge.
+	 *
+	 * type is informational -- nothing in the driver path reads it -- and
+	 * the sources disagree: ROCKNIX spells this family "d" (micro) while
+	 * Anbernic's own listing for the RG40XX V says mini, which is "c".
+	 * The socket on this shell is the mini one, so "c".
+	 *
+	 * No hpd-gpios and no ddc-i2c-bus: hotplug detect and the DDC lines
+	 * are inside the HDMI controller on this SoC, not brought out to
+	 * GPIOs, so dw-hdmi reads both itself.
+	 */
+	connector {
+		compatible = "hdmi-connector";
+		type = "c";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
 	};
 
 	de: display-engine {
@@ -497,6 +533,85 @@
 		};
 	};
 
+	/*
+	 * The HDMI controller: a Synopsys DesignWare transmitter with an
+	 * Allwinner wrapper. The first compatible is what identifies the
+	 * SoC; the second is what actually matches, because sun8i_dw_hdmi.c
+	 * in 6.18.44 has H6 quirks and no H616 entry, and the H6 quirks are
+	 * the correct ones (mode_valid rejecting nothing below 594 MHz,
+	 * use_drm_infoframe). Only the PHY needed new code -- see
+	 * patches/linux/0105.
+	 *
+	 * #sound-dai-cells is here because the binding wants it, not because
+	 * audio works. HDMI audio on this SoC goes through the AHUB, whose
+	 * driver is not in mainline at all; ROCKNIX ships one and keeps it
+	 * disabled. See docs/display.md.
+	 *
+	 * No hvcc-supply. Every H616 board in Jernej's series names a 1V8
+	 * rail here, but on this PCB the AXP717's aldo1/2/3 are all marked
+	 * unused in rg35xx-2024.dts, and ROCKNIX ships its hvcc-supply
+	 * commented out and gets a picture anyway -- so the rail is on by
+	 * PMIC default. devm_regulator_get() falls back to a dummy regulator
+	 * when the supply is absent, so the driver probes either way. If the
+	 * port stays dark with everything else correct, aldo1 is the first
+	 * thing to try: it is the rail ROCKNIX guessed at.
+	 */
+	hdmi: hdmi@6000000 {
+		compatible = "allwinner,sun50i-h616-dw-hdmi",
+			     "allwinner,sun50i-h6-dw-hdmi";
+		reg = <0x06000000 0x10000>;
+		reg-io-width = <1>;
+		interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&ccu CLK_BUS_HDMI>, <&ccu CLK_HDMI_SLOW>,
+			 <&ccu CLK_HDMI>, <&ccu CLK_HDMI_CEC>,
+			 <&ccu CLK_HDCP>, <&ccu CLK_BUS_HDCP>;
+		clock-names = "iahb", "isfr", "tmds", "cec", "hdcp",
+			      "hdcp-bus";
+		resets = <&ccu RST_BUS_HDMI>, <&ccu RST_BUS_HDCP>;
+		reset-names = "ctrl", "hdcp";
+		phys = <&hdmi_phy>;
+		phy-names = "phy";
+		#sound-dai-cells = <0>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			hdmi_in: port@0 {
+				reg = <0>;
+
+				hdmi_in_tcon_top: endpoint {
+					remote-endpoint = <&tcon_top_hdmi_out_hdmi>;
+				};
+			};
+
+			hdmi_out: port@1 {
+				reg = <1>;
+
+				hdmi_out_con: endpoint {
+					remote-endpoint = <&hdmi_con_in>;
+				};
+			};
+		};
+	};
+
+	/*
+	 * The HDMI PHY. Its compatible is the one thing in this pipeline
+	 * that 6.18.44 cannot match at all, which is what
+	 * patches/linux/0105 adds. Without that patch this node does not
+	 * bind, and because sun4i-drm is a component master that takes down
+	 * the whole display -- the panel included.
+	 */
+	hdmi_phy: hdmi-phy@6010000 {
+		compatible = "allwinner,sun50i-h616-hdmi-phy";
+		reg = <0x06010000 0x10000>;
+		clocks = <&ccu CLK_BUS_HDMI>, <&ccu CLK_HDMI_SLOW>;
+		clock-names = "bus", "mod";
+		resets = <&ccu RST_BUS_HDMI_SUB>;
+		reset-names = "phy";
+		#phy-cells = <0>;
+	};
+
 	tcon_top: tcon-top@6510000 {
 		compatible = "allwinner,sun50i-h616-tcon-top",
 			     "allwinner,sun50i-h6-tcon-top";
@@ -547,14 +662,12 @@
 			};
 
 			/*
-			 * dtc warns that #address-cells/#size-cells are
-			 * unnecessary for a single child (graph_child_address).
-			 * They are necessary here: the reg is load-bearing, and
-			 * without the cells dtc inherits <2>/<1> from /soc,
-			 * calls a 4-byte reg malformed and cascades six further
-			 * warnings. One informational warning is the better
-			 * trade. It goes away by itself if tcon_tv0 is ever
-			 * wired up, since the port then has two endpoints.
+			 * Two endpoints, and the reg on each is the TCON index
+			 * -- 0 is tcon_lcd0, 2 is tcon_tv0. Same numbering as
+			 * ROCKNIX. Both are described, but only one can be
+			 * carrying pixels: TCON_TOP_PORT_SEL's DE0 field names
+			 * a single TCON and sun8i_tcon_top_de_config() rewrites
+			 * it whenever a TCON is enabled.
 			 */
 			tcon_top_mixer0_out: port@1 {
 				reg = <1>;
@@ -564,6 +677,34 @@
 				tcon_top_mixer0_out_tcon_lcd0: endpoint@0 {
 					reg = <0>;
 					remote-endpoint = <&tcon_lcd0_in_tcon_top_mixer0>;
+				};
+
+				tcon_top_mixer0_out_tcon_tv0: endpoint@2 {
+					reg = <2>;
+					remote-endpoint = <&tcon_tv0_in_tcon_top_mixer0>;
+				};
+			};
+
+			/*
+			 * TCON TOP's own HDMI pair. Port 4 takes TCON TV0's
+			 * output back in and port 5 hands it to the HDMI
+			 * controller; the block sits in the middle of that path
+			 * on H6-family SoCs rather than the TCON driving the
+			 * transmitter directly.
+			 */
+			tcon_top_hdmi_in: port@4 {
+				reg = <4>;
+
+				tcon_top_hdmi_in_tcon_tv0: endpoint {
+					remote-endpoint = <&tcon_tv0_out_tcon_top>;
+				};
+			};
+
+			tcon_top_hdmi_out: port@5 {
+				reg = <5>;
+
+				tcon_top_hdmi_out_hdmi: endpoint {
+					remote-endpoint = <&hdmi_in_tcon_top>;
 				};
 			};
 		};
@@ -604,6 +745,65 @@
 
 				tcon_lcd0_out_lcd: endpoint {
 					remote-endpoint = <&panel_in_rgb>;
+				};
+			};
+		};
+	};
+
+	/*
+	 * TCON TV0 -- the timing controller HDMI scans out of. TCON2 in
+	 * TCON_TOP_PORT_SEL's numbering, which is what the reg = <2> on
+	 * tcon_top's output endpoint above encodes.
+	 *
+	 * Its compatible has no fallback on purpose: "allwinner,sun8i-r40-
+	 * tcon-tv" would match a quirk set without hdmi_pad, and H616 needs
+	 * SUN4I_TCON_GCTL_PAD_SEL set for the TCON's output to reach the
+	 * HDMI transmitter at all. patches/linux/0100 adds the H616 quirks
+	 * that do set it; without that patch this node simply does not bind.
+	 *
+	 * "tcon-ch1" comes from tcon_top rather than the CCU: TCON TOP owns
+	 * the TV0 clock gate and re-exports it, which is why tcon_top
+	 * carries #clock-cells and clock-output-names.
+	 */
+	tcon_tv0: lcd-controller@6515000 {
+		compatible = "allwinner,sun50i-h616-tcon-tv";
+		reg = <0x06515000 0x1000>;
+		interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&ccu CLK_BUS_TCON_TV0>,
+			 <&tcon_top CLK_TCON_TOP_TV0>;
+		clock-names = "ahb", "tcon-ch1";
+		resets = <&ccu RST_BUS_TCON_TV0>;
+		reset-names = "lcd";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/*
+			 * One input endpoint, not two. sun4i_tcon_find_engine()
+			 * takes a different path when a TCON's input port has
+			 * more than one child: it stops traversing the graph
+			 * and matches engine ids against the TCON's index in
+			 * the driver's list instead. With one mixer and two
+			 * TCONs the second lookup would ask for engine id 1,
+			 * find nothing, and fail the whole component master --
+			 * which is the panel as well as HDMI. So both TCONs
+			 * keep exactly one input endpoint and both resolve to
+			 * mixer0 by traversal.
+			 */
+			tcon_tv0_in: port@0 {
+				reg = <0>;
+
+				tcon_tv0_in_tcon_top_mixer0: endpoint {
+					remote-endpoint = <&tcon_top_mixer0_out_tcon_tv0>;
+				};
+			};
+
+			tcon_tv0_out: port@1 {
+				reg = <1>;
+
+				tcon_tv0_out_tcon_top: endpoint {
+					remote-endpoint = <&tcon_top_hdmi_in_tcon_tv0>;
 				};
 			};
 		};
