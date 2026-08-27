@@ -177,14 +177,16 @@ soldering iron.
 
 ## Known limitations
 
-- **No HDMI.** The SoC nodes are upstream but nothing here describes the
-  connector.
-- **Eight kernel patches are carried** in `patches/linux/`, none of them
+- **HDMI is described but has never been tested on hardware**, and it is
+  picture only — HDMI audio needs a driver that is not in mainline. It cannot
+  run at the same time as the panel either: one display engine, two outputs,
+  one at a time. See [the display notes](docs/display.md).
+- **Nine kernel patches are carried** in `patches/linux/`, none of them
   upstream as of 6.18, so all need checking on a kernel bump. Three are fixes
   found here (`pwrseq_simple` GPIO reset, without which there is no WiFi; a
   sun4i USB phy fix, without which the gadget never enumerates; and an AXP717
   soft power-off, without which shutdown falls through to PSCI and the board
-  reboots instead); five are the H616 display stack. See [the display
+  reboots instead); six are the H616 display stack. See [the display
   notes](docs/display.md).
 - **Two Buildroot patches** in `patches/buildroot/`, described in
   [`patches/buildroot/README.md`](patches/buildroot/README.md).

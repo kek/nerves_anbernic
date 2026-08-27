@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+**The mini-HDMI port is described.** The device tree now carries
+`hdmi@6000000`, `hdmi-phy@6010000`, `lcd-controller@6515000` (TCON TV0) and an
+`hdmi-connector`, so the pipeline forks after TCON TOP: `mixer0 -> tcon_top ->
+tcon_lcd0 -> panel` as before, and `mixer0 -> tcon_top -> tcon_tv0 -> hdmi`
+alongside it. `CONFIG_DRM_SUN8I_DW_HDMI` goes to `=y`.
+
+Only one new kernel patch was needed.
+`patches/linux/0105-drm-sun4i-add-the-h616-hdmi-phy-variant.patch` is Jernej
+Skrabec's H616 HDMI PHY support — three configuration tables and one
+`of_device_id` entry, 75 lines. Everything else was already here or already
+upstream: `sun8i_dw_hdmi.c` matches through the `allwinner,sun50i-h6-dw-hdmi`
+fallback with the correct quirks, the `allwinner,sun50i-h616-tcon-tv` quirks
+(including the `hdmi_pad` bit) came in with `0100` for the panel, and every
+clock and reset the new nodes reference is already in 6.18.44's H616 CCU
+headers.
+
+> [!WARNING]
+> **Never tested on hardware.** No kernel from this tree has ever driven the
+> HDMI port. And the risk is not confined to HDMI: `sun4i-drm` is a component
+> master, and the HDMI controller, PHY and TCON TV0 are now components of it,
+> so one of them failing to bind takes down **the panel as well**. Flash this
+> to a slot you can lose and do not `VALIDATE` until the screen comes up.
+
+Two limits are structural rather than provisional:
+
+- **The panel and HDMI cannot be on at the same time.** DE33's plane registers
+  are one block shared by both mixers, upstream's mixer binding claims that
+  block exclusively as `reg` index 0, and a second mixer node asking for the
+  same window fails with `-EBUSY`. So this tree has one mixer, both CRTCs
+  resolve to it, and `TCON_TOP_PORT_SEL` feeds one TCON at a time. The
+  refactor that lifts this is still in review on dri-devel.
+- **Picture only, no HDMI audio.** It runs through Allwinner's audio hub, whose
+  driver has never been submitted upstream; ROCKNIX carries one and ships it
+  disabled.
+
+`tools/check-dts.sh` asserts the whole HDMI branch, including that each TCON
+keeps exactly one input endpoint — two would send
+`sun4i_tcon_find_engine()` down an id-matching path that cannot work with a
+single mixer, and the symptom would be no display at all.
+
 **The power button reaches Linux, and power off now powers off.** Two separate
 absences, either of which alone left the same symptom.
 
@@ -56,8 +96,8 @@ defconfig and not a property of this board. The wider question — that this
 board is LPDDR3 and not the LPDDR4 its sibling's defconfig declares — is
 settled four ways in [DRAM verification](docs/dram-verification.md).
 
-**Eight kernel patches** are now carried in `patches/linux/`, the new one being
-the AXP717 power-off above.
+**Nine kernel patches** are now carried in `patches/linux/`, the new ones being
+the AXP717 power-off and the H616 HDMI PHY above.
 
 `docs/superpowers/` was deleted, its one remaining document having moved out to
 the project journal, and `docs/**` is now globbed as CC-BY-4.0 rather than

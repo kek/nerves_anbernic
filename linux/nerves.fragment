@@ -213,6 +213,24 @@ CONFIG_EXTRA_FIRMWARE_DIR="firmware"
 CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_GPIO=y
 
+# The mini-HDMI port. Built in for the same component-master reason as
+# everything above it: linux/sun50i-h700-anbernic-rg40xx-v.dts puts hdmi@6000000
+# in the display graph, so sun4i-drm counts it as a component and will not
+# finish binding until it registers. A modular sun8i_dw_hdmi would leave the
+# panel dark until something loaded it, and nothing would.
+#
+# DRM_DW_HDMI is selected rather than chosen, so this one symbol is enough.
+# It will not appear in the committed defconfig, the same way DRM_SUN8I_MIXER
+# does not: the arm64 defconfig pins it at =m, and once it is =y that matches
+# its Kconfig default of DRM_SUN4I and savedefconfig drops the line. So it is
+# on gen-kernel-defconfig-inner.sh's boot-critical list, which reads the full
+# .config, and a regression to =m would otherwise be invisible in review.
+#
+# This gets a picture, not sound. HDMI audio on H616 goes through Allwinner's
+# audio hub, whose driver has never been submitted upstream -- ROCKNIX carries
+# one and ships it disabled. See docs/display.md.
+CONFIG_DRM_SUN8I_DW_HDMI=y
+
 # Put the kernel log on the panel.
 #
 # This is the point of the exercise as much as graphics are: the device has no

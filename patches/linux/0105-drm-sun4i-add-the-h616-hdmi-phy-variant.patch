@@ -1,0 +1,126 @@
+drm/sun4i: add the H616 HDMI PHY variant
+
+Taken verbatim from ROCKNIX's 0002-rg35xx-enable-HDMI-LCD.patch, which carries
+Jernej Skrabec's H616 display series downstream; this is patch 06/21 of that
+series, "Add support for H616 HDMI PHY".
+
+Upstream status: not upstream as of 6.18.44. Jernej's DE33 series is still in
+review on dri-devel (v8, "drm/sun4i: update DE33 support"), and his own cover
+letter says the remaining patches -- the ones that complete the H616 display
+pipeline, HDMI included -- go out only once that series lands. So there is no
+6.19 to wait for yet.
+
+What is missing from 6.18.44, and what is not. sun8i_dw_hdmi.c already has
+everything the H616 controller needs: the DT node below claims
+"allwinner,sun50i-h616-dw-hdmi" first and falls back to
+"allwinner,sun50i-h6-dw-hdmi", and the H6 quirks are the right ones. The TCON
+TV quirks and the display-engine compatible are already in
+patches/linux/0100. The one genuine gap is here: sun8i_hdmi_phy.c knows five
+PHY variants and none of them is H616, so hdmi-phy@6010000 would never bind
+and, because the DRM device is a component master, nothing else in the
+pipeline would either.
+
+The three tables are the PHY's per-pixel-clock configuration -- MPLL, current
+control and symbol/termination/level -- for 27, 74.25, 148.5, 297 and 594 MHz,
+i.e. up to 4K30. The init function is shared with the H6 unchanged, which is
+the whole reason this is 75 lines rather than a driver.
+
+NOT VERIFIED ON HARDWARE. Nothing in this tree has ever driven the HDMI port.
+The values come from a distribution that ships them for this SoC family, not
+from a measurement made here.
+diff --git a/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c b/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c
+index 4fa69c463dc4..e02cf3136d7d 100644
+--- a/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c
++++ b/drivers/gpu/drm/sun4i/sun8i_hdmi_phy.c
+@@ -124,6 +124,66 @@ static const struct dw_hdmi_phy_config sun50i_h6_phy_config[] = {
+ 	{ ~0UL,	     0x0000, 0x0000, 0x0000}
+ };
+ 
++static const struct dw_hdmi_mpll_config sun50i_h616_mpll_cfg[] = {
++	{
++		27000000, {
++			{ 0x00b3, 0x0003 },
++			{ 0x2153, 0x0003 },
++			{ 0x40f3, 0x0003 },
++		},
++	},  {
++		74250000, {
++			{ 0x0072, 0x0003 },
++			{ 0x2145, 0x0003 },
++			{ 0x4061, 0x0003 },
++		},
++	},  {
++		148500000, {
++			{ 0x0051, 0x0003 },
++			{ 0x214c, 0x0003 },
++			{ 0x4064, 0x0003 },
++		},
++	},  {
++		297000000, {
++			{ 0x0040, 0x0003 },
++			{ 0x3b4c, 0x0003 },
++			{ 0x5a64, 0x0003 },
++		},
++	},  {
++		594000000, {
++			{ 0x1a40, 0x0003 },
++			{ 0x3b4c, 0x0003 },
++			{ 0x5a64, 0x0003 },
++		},
++	}, {
++		~0UL, {
++			{ 0x0000, 0x0000 },
++			{ 0x0000, 0x0000 },
++			{ 0x0000, 0x0000 },
++		},
++	}
++};
++
++static const struct dw_hdmi_curr_ctrl sun50i_h616_cur_ctr[] = {
++	/* pixelclk    bpp8    bpp10   bpp12 */
++	{ 27000000,  { 0x0012, 0x0000, 0x0000 }, },
++	{ 74250000,  { 0x0013, 0x0013, 0x0013 }, },
++	{ 148500000, { 0x0019, 0x0019, 0x0019 }, },
++	{ 297000000, { 0x0019, 0x001b, 0x0019 }, },
++	{ 594000000, { 0x0010, 0x0010, 0x0010 }, },
++	{ ~0UL,      { 0x0000, 0x0000, 0x0000 }, }
++};
++
++static const struct dw_hdmi_phy_config sun50i_h616_phy_config[] = {
++	/*pixelclk   symbol   term   vlev*/
++	{ 27000000,  0x8009, 0x0007, 0x02b0},
++	{ 74250000,  0x8019, 0x0004, 0x0290},
++	{ 148500000, 0x8019, 0x0004, 0x0290},
++	{ 297000000, 0x8039, 0x0004, 0x022b},
++	{ 594000000, 0x8029, 0x0000, 0x008a},
++	{ ~0UL,	     0x0000, 0x0000, 0x0000}
++};
++
+ static void sun8i_hdmi_phy_set_polarity(struct sun8i_hdmi_phy *phy,
+ 					const struct drm_display_mode *mode)
+ {
+@@ -626,6 +686,13 @@ static const struct sun8i_hdmi_phy_variant sun50i_h6_hdmi_phy = {
+ 	.phy_init = &sun50i_hdmi_phy_init_h6,
+ };
+ 
++static const struct sun8i_hdmi_phy_variant sun50i_h616_hdmi_phy = {
++	.cur_ctr  = sun50i_h616_cur_ctr,
++	.mpll_cfg = sun50i_h616_mpll_cfg,
++	.phy_cfg  = sun50i_h616_phy_config,
++	.phy_init = &sun50i_hdmi_phy_init_h6,
++};
++
+ static const struct of_device_id sun8i_hdmi_phy_of_table[] = {
+ 	{
+ 		.compatible = "allwinner,sun8i-a83t-hdmi-phy",
+@@ -647,6 +714,10 @@ static const struct of_device_id sun8i_hdmi_phy_of_table[] = {
+ 		.compatible = "allwinner,sun50i-h6-hdmi-phy",
+ 		.data = &sun50i_h6_hdmi_phy,
+ 	},
++	{
++		.compatible = "allwinner,sun50i-h616-hdmi-phy",
++		.data = &sun50i_h616_hdmi_phy,
++	},
+ 	{ /* sentinel */ }
+ };
+ 
