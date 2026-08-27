@@ -304,8 +304,10 @@ itself can unbind fbcon by writing `0` to
 > until you have seen the panel come up.
 
 The port is a mini-HDMI socket on the top edge, wired to the H700's own
-Synopsys DesignWare transmitter — there is no external bridge chip. The path
-is:
+Synopsys DesignWare transmitter — there is no external bridge chip, so the
+"connector fitted but no transmitter behind it" failure some handhelds have
+does not apply here. Both the stock firmware and muOS drive it; muOS caps at
+720p and calls 1080p unstable. The path is:
 
 ```
 mixer0 -> tcon_top -> tcon_tv0 -> hdmi -> connector
@@ -334,6 +336,22 @@ Everything else was already satisfied —
 `CONFIG_DRM_SUN8I_DW_HDMI` goes to `=y` for the reason the whole stack is
 built in: `hdmi@6000000` is in the display graph, so sun4i-drm counts it as a
 component and will not finish binding until it registers.
+
+### What a mainline kernel gets elsewhere
+
+Worth recording, because it says both that this is achievable and that it is
+still nobody's upstream:
+
+- ROCKNIX has run HDMI on this SoC family since a May 2025 pull request, and a
+  hands-on writeup of an RG40XX V on a ROCKNIX nightly reports the port
+  working at **1280×720**, with the display plugged in before power-on.
+- ROCKNIX's H700 target is on **mainline 7.2**, and it still carries the same
+  HDMI PHY patch. Checked against Torvalds' master: `sun8i_hdmi_phy.c` has no
+  H616 variant there either. So this is not a patch that goes away on the next
+  kernel bump — it goes away when Jernej's series lands, which the DE33
+  refactor is still ahead of.
+- The same 7.2-era ROCKNIX now ships its HDMI *audio* driver disabled, so
+  HDMI audio is dormant downstream too and not just absent here.
 
 ### The panel and HDMI cannot both be on
 
@@ -379,7 +397,7 @@ binds holds up the whole device. So:
 | No `/sys/class/drm/card0` at all, panel dark | An HDMI-side component did not bind. Check `dmesg` for `hdmi-phy` and `sun8i-dw-hdmi`; if the PHY compatible went unmatched, `patches/linux/0105` did not apply |
 | `card0` exists, panel fine, no HDMI connector listed | The controller bound but the graph did not reach the connector. Check `/sys/class/drm/` for a `card0-HDMI-A-1` |
 | HDMI connector present, always `disconnected` | Hotplug detect. HPD and DDC are inside the controller on this SoC, not GPIOs, so this points at the controller's own power rather than wiring |
-| HDMI connector `connected`, black screen | The PHY. The board describes no `hvcc-supply`, because the AXP717's `aldo1`/`aldo2`/`aldo3` are all marked unused upstream and ROCKNIX left its own `hvcc-supply` commented out rather than guess. `devm_regulator_get()` falls back to a dummy regulator, so an unpowered HDMI I/O rail would look exactly like this. `aldo1` is the first candidate |
+| HDMI connector `connected`, black screen | The PHY. The board describes no `hvcc-supply`, because the AXP717's `aldo1`/`aldo2`/`aldo3` are all marked unused upstream and ROCKNIX ships its own `hvcc-supply` commented out — HDMI works downstream without it, so the rail is evidently on by PMIC default. `devm_regulator_get()` falls back to a dummy regulator, so an unpowered HDMI I/O rail would look exactly like this. `aldo1` is the first thing to try, since it is the one Ryan Walklin guessed at |
 
 ## Reading a screen that is wrong
 

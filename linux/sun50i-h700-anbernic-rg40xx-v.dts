@@ -547,14 +547,14 @@
 	 * driver is not in mainline at all; ROCKNIX ships one and keeps it
 	 * disabled. See docs/display.md.
 	 *
-	 * No hvcc-supply. Every H616 board upstream names a 1V8 rail here,
-	 * but on this PCB the AXP717's aldo1/2/3 are all marked unused in
-	 * rg35xx-2024.dts and ROCKNIX left its hvcc-supply commented out
-	 * rather than guess. devm_regulator_get() falls back to a dummy
-	 * regulator when the supply is absent, so the driver probes either
-	 * way -- if the port stays dark with everything else correct, an
-	 * unpowered HDMI I/O rail is the first thing to suspect and aldo1
-	 * the first candidate.
+	 * No hvcc-supply. Every H616 board in Jernej's series names a 1V8
+	 * rail here, but on this PCB the AXP717's aldo1/2/3 are all marked
+	 * unused in rg35xx-2024.dts, and ROCKNIX ships its hvcc-supply
+	 * commented out and gets a picture anyway -- so the rail is on by
+	 * PMIC default. devm_regulator_get() falls back to a dummy regulator
+	 * when the supply is absent, so the driver probes either way. If the
+	 * port stays dark with everything else correct, aldo1 is the first
+	 * thing to try: it is the rail ROCKNIX guessed at.
 	 */
 	hdmi: hdmi@6000000 {
 		compatible = "allwinner,sun50i-h616-dw-hdmi",

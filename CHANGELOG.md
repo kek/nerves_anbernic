@@ -25,6 +25,10 @@ headers.
 > so one of them failing to bind takes down **the panel as well**. Flash this
 > to a slot you can lose and do not `VALIDATE` until the screen comes up.
 
+That it is achievable is not in doubt, only that this tree does it: ROCKNIX
+has driven HDMI on this SoC family since May 2025, and a hands-on writeup of
+an RG40XX V on a ROCKNIX nightly reports 1280×720 out of the port.
+
 Two limits are structural rather than provisional:
 
 - **The panel and HDMI cannot be on at the same time.** DE33's plane registers
