@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+**The CPU can change frequency, for the first time.**
+`/sys/devices/system/cpu/cpufreq` was empty on this board — not a policy with
+one operating point, no policy at all — so the cores ran at whatever U-Boot
+left them at, in a game and behind a dark backlight alike. The four thermal
+zones had a `step_wise` governor and zero cooling devices to drive with it,
+because the cooling device for `cpu-thermal` is registered by cpufreq-dt and by
+nothing else.
+
+Only the driver was missing. `opp-table-cpu` is
+`allwinner,sun50i-h616-operating-points`, `cpu@0` carries both
+`operating-points-v2` and `cpu-supply`, and the eFuse holding the speed grade
+is present as `sunxi-sid0`. That Allwinner-specific compatible is why
+`CONFIG_CPUFREQ_DT` alone never sufficed: `sun50i-cpufreq-nvmem.c` reads the
+grade, sets `opp-supported-hw` and only then registers the cpufreq-dt device.
+It was `=m`, and this system has no initramfs and modprobes nothing, so the
+module shipped on the device and was never loaded once.
+`CONFIG_CPU_FREQ_GOV_POWERSAVE` moves to `=y` for the same reason — a governor
+that cannot be loaded cannot be selected.
+
 **The power button reaches Linux, and power off now powers off.** Two separate
 absences, either of which alone left the same symptom.
 
