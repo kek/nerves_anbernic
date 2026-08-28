@@ -138,6 +138,16 @@ CONFIG_BOOTDELAY=0
 CONFIG_HUSH_PARSER=y
 CONFIG_CMD_SYSBOOT=y
 CONFIG_CMD_SQUASHFS=y
+# zstd decompression for the squashfs driver (fs/squashfs gates it on
+# CONFIG_ZSTD). The rootfs images are gzip today -- the compressor is chosen
+# by mksquashfs_flags in the application's `config :nerves, :firmware` at
+# `mix firmware` time, not by anything in this repo -- but zstd unpacks
+# several times faster on the A53s, which matters to Erlang VM startup since
+# every beam file is read out of this filesystem. This option is what makes
+# that switch safe to flip app-side: without it, a zstd rootfs is a card
+# U-Boot cannot read the kernel from. Ship this before any app flips the
+# flag.
+CONFIG_ZSTD=y
 CONFIG_CMD_FS_GENERIC=y
 CONFIG_CMD_PART=y
 CONFIG_DOS_PARTITION=y

@@ -1,0 +1,53 @@
+From: nerves_anbernic <none@example.com>
+Subject: [PATCH] mmc: sunxi: skip the pre-scan power-up when the slot is empty
+
+On the Anbernic RG40XXV the second card slot (mmc2, 4022000.mmc, the
+games card) is routinely empty at boot, and an empty slot costs ~1.5
+seconds of every boot:
+
+    [    2.879808] sunxi-mmc 4022000.mmc: fatal err update clk timeout
+    [    3.667822] sunxi-mmc 4022000.mmc: initialized
+
+mmc_start_host() powers the slot up before scanning unless
+MMC_CAP2_NO_PRESCAN_POWERUP is set. That power-up issues two set_ios
+calls, and on this controller variant (allwinner,sun50i-a100-emmc --
+the config without mask_data0) each one runs the "update clock"
+command into sunxi_mmc_oclk_onoff()'s 750 ms busy-wait timeout when no
+card is present. The probe is asynchronous, but prepare_namespace()
+waits for it via wait_for_device_probe() before mounting the root
+filesystem, so the two timeouts land directly on the boot critical
+path -- the observed root mount follows mmc2's probe completion by
+15 ms. mmc0, whose config has mask_data0, does not time out.
+
+The power-up buys nothing when a card-detect GPIO already reports the
+slot empty: mmc_rescan() checks the same GPIO and skips the scan
+without touching the card power. So set MMC_CAP2_NO_PRESCAN_POWERUP
+when a CD GPIO is present and reads "no card" at probe time. Slots
+with a card at boot, slots without a CD GPIO, and non-removable
+devices keep the pre-scan power-up. A card inserted later triggers a
+rescan, which powers the slot up through mmc_rescan_try_freq() as it
+always has.
+
+--- a/drivers/mmc/host/sunxi-mmc.c
++++ b/drivers/mmc/host/sunxi-mmc.c
+@@ -1443,6 +1443,20 @@
+ 		goto error_free_dma;
+
+ 	/*
++	 * When a card-detect GPIO says the slot is empty, the pre-scan
++	 * power-up in mmc_start_host() buys nothing: mmc_rescan() checks
++	 * the same GPIO and skips the scan. It is not free, either. On the
++	 * eMMC controller variants, which lack mask_data0, each set_ios of
++	 * the power-up sequence runs the "update clock" command into a
++	 * 750 ms timeout against the empty slot (sunxi_mmc_oclk_onoff), so
++	 * an empty slot costs ~1.5 s in probe -- which prepare_namespace()
++	 * waits out before mounting the root filesystem. Inserting a card
++	 * later triggers a rescan, and that powers the slot up as usual.
++	 */
++	if (!(mmc->caps & MMC_CAP_NONREMOVABLE) && mmc_gpio_get_cd(mmc) == 0)
++		mmc->caps2 |= MMC_CAP2_NO_PRESCAN_POWERUP;
++
++	/*
+ 	 * If we don't support delay chains in the SoC, we can't use any
+ 	 * of the higher speed modes. Mask them out in case the device
+ 	 * tree specifies the properties for them, which gets added to
