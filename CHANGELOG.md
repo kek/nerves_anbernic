@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+**The kernel stops paying for a 115200-baud UART nobody is watching, and for
+an empty games slot.** Two boot-time costs, about 3 seconds together, both
+measured on the dmesg clock of a running device.
+
+The first: every printk before fbcon comes up drains synchronously to ttyS0 —
+internal test pads — at 115200 baud, about 1.5 s of it. `loglevel=5` on the
+kernel command line keeps info-level chatter off the consoles while warnings
+and errors still print and `dmesg` keeps everything. It is not `quiet`
+because fbcon refuses to draw the boot logo at `console_loglevel <=
+CONSOLE_LOGLEVEL_QUIET`, and the logo is how a working boot is told apart
+from a dead panel.
+
+The second: with no games card inserted, mmc2's pre-scan power-up runs the
+controller's "update clock" command into two 750 ms timeouts (`fatal err
+update clk timeout`), inside a probe that `prepare_namespace()` waits out
+before mounting the root filesystem — the root mount trails mmc2's probe by
+15 ms. `patches/linux/0004-mmc-sunxi-skip-prescan-power-up-when-the-slot-is-
+empty.patch` sets `MMC_CAP2_NO_PRESCAN_POWERUP` when a card-detect GPIO
+reports the slot empty at probe; the rescan on later insertion powers the
+slot up as it always has, and a slot with a card at boot is untouched.
+Compile-validated only — the empty-slot timing needs confirming on hardware.
+
+Also: U-Boot gains `CONFIG_ZSTD`, so its squashfs driver can read a
+zstd-compressed rootfs. The images are gzip today — the compressor is picked
+by `mksquashfs_flags` in the application's `config :nerves, :firmware` — but
+zstd unpacks several times faster on the A53s, which is Erlang VM startup
+time. This ships first so flipping that flag app-side cannot produce a card
+U-Boot refuses to boot.
+
 **The power button reaches Linux, and power off now powers off.** Two separate
 absences, either of which alone left the same symptom.
 
